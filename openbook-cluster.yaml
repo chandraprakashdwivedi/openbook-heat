@@ -1,0 +1,121 @@
+#
+# This is a Talligent Heat template for deploying OpenBook.
+# Default user/pass for the OpenBook UI is: openbook / Tall!gent
+# supports Juno, Kilo
+
+heat_template_version: 2013-05-23
+
+description: >
+  Talligent Heat template for deploying a OpenBook in a
+  cluster scenario.
+
+parameters:
+  key_name:
+    type: string
+    description: Name of an existing key pair to use for the server
+    constraints:
+      - custom_constraint: nova.keypair
+  image:
+    type: string
+    description: Image ID or image name to use for the server
+    default: ubuntu-14.04
+    constraints:
+      - custom_constraint: glance.image
+  private_net:
+    type: string
+    description: Name of the private network for the compute server
+    default: private
+    constraints:
+      - custom_constraint: neutron.network
+  public_net:
+    type: string
+    description: Name of the public network for the compute server
+    default: public
+    constraints:
+      - custom_constraint: neutron.network
+  cluster_size:
+    type: number
+    label: Cluster size
+    description: Number of instances in cluster.
+    default: 3
+
+resources:
+  security_group:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: openbook-group
+      description: Enable access to OpenBook and SSH access
+      rules:
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 22
+          port_range_max: 22
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 8080
+          port_range_max: 8080
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 443
+          port_range_max: 443
+  
+  public_port:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_param: private_net }
+      security_groups:
+      - {get_resource: security_group}
+  
+  floating_ip:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network: { get_param: public_net }
+      port_id: { get_resource: public_port }
+  
+  #appserver:
+  #  type: lib/appserver.yaml
+  #  properties:
+  #    key_name: { get_param: key_name }
+  #    image: { get_param: image }
+  #    flavor: m1.small
+  #    network: { get_param: private_net }
+  #    floating_ip: { get_attr: [ floating_ip, floating_ip_address ] }
+  
+  openbook_cluster:
+    type: OS::Heat::ResourceGroup
+    properties:
+      count: { get_param: cluster_size }
+      resource_def:
+        type: Lib::MSG::Appserver
+        properties:
+          key_name: { get_param: key_name }
+          image: { get_param: image }
+          flavor: m1.small
+          network: { get_param: private_net }
+          floating_ip: { get_attr: [ floating_ip, floating_ip_address ] }
+  
+  haproxy:
+    type: Lib::MSG::HAProxy
+    properties:
+      key_name: { get_param: key_name }
+      image: { get_param: image }
+      flavor: m1.small
+      #networks:
+      #  - port: { get_resource: public_port }
+      port_id: { get_attr: ['public_port', 'device_id'] }
+
+outputs:
+  OpenBook_admin:
+    description: OpenBook administrative user
+    value: openbook
+  OpenBook_admin_password:
+    description: OpenBook administrative user password
+    value: Tall!g3nt
+  OpenBook_URL:
+    description: The URL to access the OpenBook UI
+    value:
+      str_replace:
+        template: https://host_ip:8443/Openbook
+        params:
+          host_ip: { get_attr: [ floating_ip, floating_ip_address ] }
+

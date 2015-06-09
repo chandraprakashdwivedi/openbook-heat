@@ -1,0 +1,126 @@
+#
+# This is a Talligent Heat template for deploying OpenBook.
+# Default user/pass for the OpenBook UI is: openbook / Tall!gent
+# supports Juno, Kilo
+
+heat_template_version: 2013-05-23
+
+description: >
+  Talligent Heat template for deploying a OpenBook in a
+  cluster scenario.
+
+parameters:
+  key_name:
+    type: string
+    description: Name of an existing key pair to use for the server
+    constraints:
+      - custom_constraint: nova.keypair
+  image:
+    type: string
+    description: Image ID or image name to use for the server
+    default: ubuntu-14.04
+    constraints:
+      - custom_constraint: glance.image
+  private_net:
+    type: string
+    description: Name of the private network for the compute server
+    default: private
+    constraints:
+      - custom_constraint: neutron.network
+  floating_ip:
+    type: string
+    label: Floating IP
+    description: Public IP (floating ip) that will be used to access OpenBook.
+
+resources:
+  wait_condition:
+    type: OS::Heat::WaitCondition
+    properties:
+      handle: { get_resource: wait_handle }
+      count: 1
+      timeout: 1800
+
+  wait_handle:
+    type: OS::Heat::WaitConditionHandle
+  
+  security_group:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: openbook-group
+      description: Enable access to OpenBook and SSH access
+      rules:
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 22
+          port_range_max: 22
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 8080
+          port_range_max: 8080
+  
+  port:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_param: private_net }
+      security_groups:
+        - { get_resource: security_group }
+    
+  openbook_instance:
+    type: OS::Nova::Server
+    properties:
+      key_name: { get_param: key_name }
+      image: { get_param: image }
+      flavor: m1.small
+      networks:
+        - port: { get_resource: port }
+      user_data_format: RAW
+      user_data:
+        str_replace:
+          params:
+            wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
+            $floating_ip: { get_param: floating_ip }
+          template: |
+            #!/bin/bash -ex
+            apt-get install software-properties-common
+            apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
+            add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
+            apt-get update
+            
+            ### TOMCAT ###
+            apt-get install -y tomcat7 mariadb-client-core-10.0 ntp unzip
+            sed -i 's/^jdk.tls.disabledAlgorithms=SSLv3/#jdk.tls.disabledAlgorithms=SSLv3/' /etc/java-7-openjdk/security/java.policy
+            sed -i 's/Xmx.*\ /Xmx2048m /g' /etc/default/tomcat7
+            sed -i '/^JAVA_OPTS/ s/"$/ -Djsse.enableSNIExtension=false -Djava.security.egd=file:\/dev\/urandom"/g' /etc/default/tomcat7
+            
+            rm -rf /var/lib/tomcat7/webapps/ROOT
+            service tomcat7 stop
+            
+            # Download and install OpenBook
+            #wget "http://10.0.2.1:8080/v1/AUTH_7c5852425d864bcc9622967942f2fe56/test-container/Openbook.war" -P /tmp/
+            wget "http://4697a425bb8fd03f7b24-30f44d71994a2698d571e9be7d46544e.r90.cf1.rackcdn.com/Openbook.war" -P /tmp/
+            unzip -q /tmp/Openbook.war -d /var/lib/tomcat7/webapps/Openbook
+            #mysql -uroot -p$admin_password < /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/db/MySQL/create_openbook_schemas.sql
+            
+            # Set the public url for OpenBook
+            sed -ri 's/(ROOT_PROVIDER_PUBLIC_URL = https:\/\/).*/\1$floating_ip:8443/' /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/openbook.properties
+            #### ADD THE DB HOST PARTS HERE
+            ####
+            
+            chown -R tomcat7.tomcat7 /var/lib/tomcat7/webapps/Openbook
+            
+            service tomcat7 start
+            
+            # Sleep a little bit to allow tomcat to finish initial liquibase run for OpenBook
+            sleep 60
+            
+            wc_notify --data-binary '{"status": "SUCCESS"}'
+outputs:
+  name:
+    description: Name of the instance.
+    value: { get_attr: [openbook_instance, name] }
+  ip:
+    description: The IP address of the instance.
+    value: { get_attr: [openbook_instance, first_address] }
+  port:
+    description: The network port of the OpenBook instance.
+    value: { get_resource: port }
