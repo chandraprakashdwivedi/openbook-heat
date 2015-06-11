@@ -21,6 +21,12 @@ parameters:
     default: ubuntu-14.04
     constraints:
       - custom_constraint: glance.image
+  flavor:
+    type: string
+    description: Flavor for the server to be created
+    default: m1.medium
+    constraints:
+      - custom_constraint: nova.flavor
   private_net:
     type: string
     description: Name of the private network for the compute server
@@ -69,7 +75,8 @@ resources:
     properties:
       key_name: { get_param: key_name }
       image: { get_param: image }
-      flavor: m1.small
+      #flavor: "m1.small"
+      flavor: { get_param: flavor }
       networks:
         #- port: { get_resource: port }
         - port: { get_param: port_id }
