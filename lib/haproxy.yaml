@@ -27,12 +27,10 @@ parameters:
     default: m1.small
     constraints:
       - custom_constraint: nova.flavor
-  #private_net:
-  #  type: string
-  #  description: Name of the private network for the compute server
-  #  default: private
-  #  constraints:
-  #    - custom_constraint: neutron.network
+  servers:
+    type: comma_delimited_list
+    label: Servers
+    description: Comma separated list of servers in the cluster.
   port_id:
     type: string
     description: ID of an existing port to associate with this server
@@ -51,7 +49,7 @@ resources:
   security_group:
     type: OS::Neutron::SecurityGroup
     properties:
-      name: openbook-group
+      name: openbook-haproxy
       description: Enable access to OpenBook and SSH access
       rules:
         - remote_ip_prefix: 0.0.0.0/0
@@ -63,23 +61,16 @@ resources:
           port_range_min: 443
           port_range_max: 443
   
-  #port:
-  #  type: OS::Neutron::Port
-  #  properties:
-  #    network: { get_param: private_net }
-  #    security_groups:
-  #    - {get_resource: security_group}
-  
   haproxy_instance:
     type: OS::Nova::Server
     properties:
       key_name: { get_param: key_name }
       image: { get_param: image }
-      #flavor: "m1.small"
       flavor: { get_param: flavor }
       networks:
-        #- port: { get_resource: port }
         - port: { get_param: port_id }
+      metadata:
+        servers: { get_param: servers }
       user_data_format: RAW
       user_data:
         str_replace:
@@ -93,11 +84,12 @@ resources:
             
             # Generate self-signed certificate
             openssl req -x509 -nodes -subj "/C=US/ST=Texas/L=Austin/O=Talligent/CN=talligent.net/emailAddress=support@talligent.com" -days 365 -newkey rsa:2048 -keyout openbook.key -out openbook.crt
-            # openssl x509 -in apache.crt -text -noout
+            # openssl x509 -in openbook.crt -text -noout
             cat openbook.crt openbook.key > openbook.pem
             mv openbook.pem /etc/ssl/private/
             
             # update haproxy config
+            sed -i "/^global/a\\\ttune.ssl.default-dh-param 2048" /etc/haproxy/haproxy.cfg
             sed -i "/mode\thttp/a\\\toption forwardfor\n\toption http-server-close" /etc/haproxy/haproxy.cfg
             cat << EOF >> /etc/haproxy/haproxy.cfg
             frontend www-https
@@ -115,7 +107,7 @@ resources:
             EOF
             
             # Add the Rackspace haproxy update example
-                        # save haproxy original configuration
+            # save haproxy original configuration
             cp /etc/haproxy/haproxy.cfg /etc/haproxy/haproxy_base.cfg
             
             # write an initial empty list of worker servers

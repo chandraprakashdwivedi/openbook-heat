@@ -52,7 +52,7 @@ resources:
   security_group:
     type: OS::Neutron::SecurityGroup
     properties:
-      name: openbook-group
+      name: openbook-appserver
       description: Enable access to OpenBook and SSH access
       rules:
         - remote_ip_prefix: 0.0.0.0/0
