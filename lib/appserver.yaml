@@ -24,7 +24,7 @@ parameters:
   flavor:
     type: string
     description: Flavor for the server to be created
-    default: m1.medium
+    default: m1.small
     constraints:
       - custom_constraint: nova.flavor
   private_net:
