@@ -6,7 +6,7 @@
 heat_template_version: 2013-05-23
 
 description: >
-  Talligent Heat template for deploying a OpenBook in a
+  Talligent Heat template for deploying OpenBook in a
   cluster scenario.
 
 parameters:

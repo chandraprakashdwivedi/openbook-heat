@@ -6,7 +6,7 @@
 heat_template_version: 2013-05-23
 
 description: >
-  Talligent Heat template for deploying a OpenBook in a
+  Talligent Heat template for deploying OpenBook in a
   cluster scenario.
 
 parameters:
@@ -27,12 +27,12 @@ parameters:
     default: m1.small
     constraints:
       - custom_constraint: nova.flavor
-  private_net:
-    type: string
-    description: Name of the private network for the compute server
-    default: private
-    constraints:
-      - custom_constraint: neutron.network
+  #private_net:
+  #  type: string
+  #  description: Name of the private network for the compute server
+  #  default: private
+  #  constraints:
+  #    - custom_constraint: neutron.network
   port_id:
     type: string
     description: ID of an existing port to associate with this server
