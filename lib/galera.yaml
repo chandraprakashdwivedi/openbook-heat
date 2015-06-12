@@ -189,15 +189,15 @@ resources:
             
             # Download and install OpenBook
             #wget "http://10.0.2.1:8080/v1/AUTH_7c5852425d864bcc9622967942f2fe56/test-container/Openbook.war" -P /tmp/
-            #wget "http://4697a425bb8fd03f7b24-30f44d71994a2698d571e9be7d46544e.r90.cf1.rackcdn.com/Openbook.war" -P /tmp/
-            #unzip -q /tmp/Openbook.war -d /var/lib/tomcat7/webapps/Openbook
-            #mysql -uroot -p$admin_password < /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/db/MySQL/create_openbook_schemas.sql
+            wget "http://4697a425bb8fd03f7b24-30f44d71994a2698d571e9be7d46544e.r90.cf1.rackcdn.com/Openbook.war" -P /tmp/
+            unzip -q /tmp/Openbook.war -d /var/lib/tomcat7/webapps/Openbook
+            mysql -uroot -p$admin_password < /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/db/MySQL/create_openbook_schemas.sql
             
             # Set logo path to be relative so that it uses the https path
-            #mysql -uroot -p$admin_password <<-EOF
-            #UPDATE openbook.t_provider 
-            #SET personalization_settings = '{"logoFileUrl":"/Openbook/static/images/Talligent-logo_small.png"}';
-            #EOF
+            mysql -uroot -p$admin_password <<-EOF
+            UPDATE openbook.t_provider 
+            SET personalization_settings = '{"logoFileUrl":"/Openbook/static/images/Talligent-logo_small.png"}';
+            EOF
             
             wc_notify --data-binary '{"status": "SUCCESS"}'
   
