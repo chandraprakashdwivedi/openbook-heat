@@ -66,6 +66,22 @@ resources:
           protocol: tcp
           port_range_min: 3306
           port_range_max: 3306
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 4567
+          port_range_max: 4567
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: udp
+          port_range_min: 4567
+          port_range_max: 4567
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 4568
+          port_range_max: 4568
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 4444
+          port_range_max: 4444
   
   port:
     type: OS::Neutron::Port
@@ -92,6 +108,8 @@ resources:
             wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
           template: |
             #!/bin/bash -ex
+            my_ip=$(hostname -I | sed 's/ //g')
+            master_ip=$my_ip
             apt-get install software-properties-common
             apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
             add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
@@ -121,10 +139,53 @@ resources:
             
             mysql -uroot -p$admin_password <<-EOF
             GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' IDENTIFIED BY '$admin_password' WITH GRANT OPTION;
+            GRANT ALL PRIVILEGES ON *.* TO 'debian-sys-maint'@'localhost' IDENTIFIED BY '$admin_password';
             EOF
             
-            sed -i "s/bind-address.*/bind-address = 0.0.0.0/" /etc/mysql/my.cnf
-            service mysql restart
+            #service mysql stop
+            
+            cat << EOF >> /etc/mysql/conf.d/cluster.cnf
+            [mysqld]
+            query_cache_size=0
+            binlog_format=ROW
+            default-storage-engine=innodb
+            innodb_autoinc_lock_mode=2
+            query_cache_type=0
+            bind-address=0.0.0.0
+            
+            # Galera Provider Configuration
+            wsrep_provider=/usr/lib/galera/libgalera_smm.so
+            
+            # Galera Cluster Configuration
+            wsrep_cluster_name="openbook_cluster"
+            wsrep_cluster_address="gcomm://$master_ip"
+            
+            # Galera Synchronization Congifuration
+            wsrep_sst_method=rsync
+            
+            # Galera Node Configuration
+            wsrep_node_address="$my_ip"
+            wsrep_node_name="galera1"
+            EOF
+            
+            #sed -i "s/bind-address.*/bind-address = 0.0.0.0/" /etc/mysql/my.cnf
+            
+            cat << EOF > /etc/mysql/debian.cnf
+            [client]
+            host     = localhost
+            user     = debian-sys-maint
+            password = $admin_password
+            socket   = /var/run/mysqld/mysqld.sock
+            [mysql_upgrade]
+            host     = localhost
+            user     = debian-sys-maint
+            password = $admin_password
+            socket   = /var/run/mysqld/mysqld.sock
+            basedir  = /usr
+            EOF
+            
+            service mysql stop
+            service mysql start --wsrep-new-cluster
             
             # Download and install OpenBook
             #wget "http://10.0.2.1:8080/v1/AUTH_7c5852425d864bcc9622967942f2fe56/test-container/Openbook.war" -P /tmp/
@@ -155,9 +216,12 @@ resources:
         str_replace:
           params:
             $admin_password: { get_attr: [administrative_password, value] }
+            $master_ip: { get_attr: [galera1, first_address] }
             wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
           template: |
             #!/bin/bash -ex
+            my_ip=$(hostname -I | sed 's/ //g')
+            
             apt-get install software-properties-common
             apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
             add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
@@ -187,9 +251,51 @@ resources:
             
             mysql -uroot -p$admin_password <<-EOF
             GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' IDENTIFIED BY '$admin_password' WITH GRANT OPTION;
+            GRANT ALL PRIVILEGES ON *.* TO 'debian-sys-maint'@'localhost' IDENTIFIED BY '$admin_password';
             EOF
             
-            sed -i "s/bind-address.*/bind-address = 0.0.0.0/" /etc/mysql/my.cnf
+            #service mysql stop
+            
+            cat << EOF >> /etc/mysql/conf.d/cluster.cnf
+            [mysqld]
+            query_cache_size=0
+            binlog_format=ROW
+            default-storage-engine=innodb
+            innodb_autoinc_lock_mode=2
+            query_cache_type=0
+            bind-address=0.0.0.0
+            
+            # Galera Provider Configuration
+            wsrep_provider=/usr/lib/galera/libgalera_smm.so
+            
+            # Galera Cluster Configuration
+            wsrep_cluster_name="openbook_cluster"
+            wsrep_cluster_address="gcomm://$master_ip"
+            
+            # Galera Synchronization Congifuration
+            wsrep_sst_method=rsync
+            
+            # Galera Node Configuration
+            wsrep_node_address="$my_ip"
+            wsrep_node_name="galera2"
+            EOF
+            
+            #sed -i "s/bind-address.*/bind-address = 0.0.0.0/" /etc/mysql/my.cnf
+            
+            cat << EOF > /etc/mysql/debian.cnf
+            [client]
+            host     = localhost
+            user     = debian-sys-maint
+            password = $admin_password
+            socket   = /var/run/mysqld/mysqld.sock
+            [mysql_upgrade]
+            host     = localhost
+            user     = debian-sys-maint
+            password = $admin_password
+            socket   = /var/run/mysqld/mysqld.sock
+            basedir  = /usr
+            EOF
+            
             service mysql restart
             
             # Download and install OpenBook
@@ -221,9 +327,11 @@ resources:
         str_replace:
           params:
             $admin_password: { get_attr: [administrative_password, value] }
+            $master_ip: { get_attr: [galera1, first_address] }
             wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
           template: |
             #!/bin/bash -ex
+            my_ip=$(hostname -I | sed 's/ //g')
             apt-get install software-properties-common
             apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
             add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
@@ -253,9 +361,54 @@ resources:
             
             mysql -uroot -p$admin_password <<-EOF
             GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' IDENTIFIED BY '$admin_password' WITH GRANT OPTION;
+            GRANT ALL PRIVILEGES ON *.* TO 'debian-sys-maint'@'localhost' IDENTIFIED BY '$admin_password';
             EOF
             
-            sed -i "s/bind-address.*/bind-address = 0.0.0.0/" /etc/mysql/my.cnf
+            #service mysql stop
+            
+            cat << EOF >> /etc/mysql/conf.d/cluster.cnf
+            [mysqld]
+            query_cache_size=0
+            binlog_format=ROW
+            default-storage-engine=innodb
+            innodb_autoinc_lock_mode=2
+            query_cache_type=0
+            bind-address=0.0.0.0
+            
+            # Galera Provider Configuration
+            wsrep_provider=/usr/lib/galera/libgalera_smm.so
+            
+            # Galera Cluster Configuration
+            wsrep_cluster_name="openbook_cluster"
+            wsrep_cluster_address="gcomm://$master_ip"
+            
+            # Galera Synchronization Congifuration
+            wsrep_sst_method=rsync
+            
+            # Galera Node Configuration
+            wsrep_node_address="$my_ip"
+            wsrep_node_name="galera3"
+            EOF
+            
+            #sed -i "s/bind-address.*/bind-address = 0.0.0.0/" /etc/mysql/my.cnf
+            
+            cat << EOF > /etc/mysql/debian.cnf
+            [client]
+            host     = localhost
+            user     = debian-sys-maint
+            password = $admin_password
+            socket   = /var/run/mysqld/mysqld.sock
+            [mysql_upgrade]
+            host     = localhost
+            user     = debian-sys-maint
+            password = $admin_password
+            socket   = /var/run/mysqld/mysqld.sock
+            basedir  = /usr
+            EOF
+            
+            #################
+            #################
+            # MIGHT NEED TO THROW IN A mysql query check to see if the first node is full up
             service mysql restart
             
             # Download and install OpenBook
@@ -309,3 +462,6 @@ outputs:
   priv_subnet:
     description: The private subnet, hopefully
     value: { get_attr: [ port, subnets, 0, id ] }
+  galera_master:
+    description: The Galera master node info
+    value:  { get_attr: [galera1, show] }
