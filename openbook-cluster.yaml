@@ -44,6 +44,11 @@ parameters:
     label: Cluster size
     description: Number of instances in cluster.
     default: 3
+  version:
+    type: string
+    label: OpenBook version
+    description: OpenBook version to install (default: latest; ex: Openbook-2.5.083)
+    default: latest
 
 resources:
   security_group:
@@ -85,6 +90,7 @@ resources:
       image: { get_param: image }
       #flavor:
       private_net: { get_param: private_net }
+      version: { get_param: version }
     
   openbook_cluster:
     type: OS::Heat::ResourceGroup
@@ -99,6 +105,7 @@ resources:
           private_net: { get_param: private_net }
           floating_ip: { get_attr: [ floating_ip, floating_ip_address ] }
           galera_ip: { get_attr: [ galera_cluster, ip ] }
+          version: { get_param: version }
   
   haproxy:
     type: Lib::MSG::HAProxy

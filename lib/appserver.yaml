@@ -41,6 +41,10 @@ parameters:
     type: string
     label: Galera IP
     description: IP address of the Galera cluster load balancer
+  version:
+    type: string
+    description: OpenBook version to install (default: latest)
+    default: latest
 
 resources:
   wait_condition:
@@ -91,6 +95,7 @@ resources:
             wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
             $floating_ip: { get_param: floating_ip }
             $galera_ip: { get_param: galera_ip }
+            $version: { get_param: version }
           template: |
             #!/bin/bash -ex
             apt-get install software-properties-common
@@ -109,7 +114,7 @@ resources:
             
             # Download and install OpenBook
             #wget "http://10.0.2.1:8080/v1/AUTH_7c5852425d864bcc9622967942f2fe56/test-container/Openbook.war" -P /tmp/
-            wget "http://4697a425bb8fd03f7b24-30f44d71994a2698d571e9be7d46544e.r90.cf1.rackcdn.com/Openbook.war" -P /tmp/
+            wget "http://4697a425bb8fd03f7b24-30f44d71994a2698d571e9be7d46544e.r90.cf1.rackcdn.com/$version/Openbook.war" -P /tmp/
             unzip -q /tmp/Openbook.war -d /var/lib/tomcat7/webapps/Openbook
             #mysql -uroot -p$admin_password < /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/db/MySQL/create_openbook_schemas.sql
             
