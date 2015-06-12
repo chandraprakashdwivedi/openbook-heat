@@ -1,0 +1,311 @@
+#
+# This is a Talligent Heat template for deploying OpenBook.
+# Default user/pass for the OpenBook UI is: openbook / Tall!gent
+# supports Juno, Kilo
+
+heat_template_version: 2013-05-23
+
+description: >
+  Talligent Heat template for deploying OpenBook in a
+  cluster scenario.
+
+parameters:
+  key_name:
+    type: string
+    description: Name of an existing key pair to use for the server
+    constraints:
+      - custom_constraint: nova.keypair
+  image:
+    type: string
+    description: Image ID or image name to use for the server
+    default: ubuntu-14.04
+    constraints:
+      - custom_constraint: glance.image
+  flavor:
+    type: string
+    description: Flavor for the server to be created
+    default: m1.small
+    constraints:
+      - custom_constraint: nova.flavor
+  private_net:
+    type: string
+    description: Name of the private network for the compute server
+    default: private
+    constraints:
+      - custom_constraint: neutron.network
+  #private_subnet:
+  #  type: string
+  #  description: Subnet for the private network
+  #  default: c18be793-33d7-4d3e-b0e5-d8d5afefb38a
+
+resources:
+  wait_condition:
+    type: OS::Heat::WaitCondition
+    properties:
+      handle: { get_resource: wait_handle }
+      count: 1
+      timeout: 1800
+
+  wait_handle:
+    type: OS::Heat::WaitConditionHandle
+  
+  administrative_password:
+    type: OS::Heat::RandomString
+
+  security_group:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: openbook-galera
+      description: Enable access to OpenBook and SSH access
+      rules:
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 22
+          port_range_max: 22
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 3306
+          port_range_max: 3306
+  
+  port:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_param: private_net }
+      security_groups:
+        - { get_resource: security_group }
+    
+  galera1:
+    type: OS::Nova::Server
+    properties:
+      name: galera1
+      key_name: { get_param: key_name }
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      networks:
+        - network: { get_param: private_net }
+      security_groups: [ { get_resource: security_group } ]
+      user_data_format: RAW
+      user_data:
+        str_replace:
+          params:
+            $admin_password: { get_attr: [administrative_password, value] }
+            wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
+          template: |
+            #!/bin/bash -ex
+            apt-get install software-properties-common
+            apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
+            add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
+            apt-get update
+            
+            export DEBIAN_FRONTEND=noninteractive
+            
+            # configure/confirm the default root password during installation
+            debconf-set-selections <<< 'mariadb-galera-server-10.0 mysql-server/root_password password $admin_password'
+            debconf-set-selections <<< 'mariadb-galera-server-10.0 mysql-server/root_password_again password $admin_password'
+            apt-get -y install mariadb-galera-server galera
+            
+            cat << EOF >> /root/.my.cnf
+            [mysql]
+            user=root
+            password=$admin_password
+            EOF
+            
+            # mysql_secure_installation  # this asks several questions
+            ## Apparently, we can do these queries manually, instead
+            mysql -uroot -p$admin_password <<-EOF
+            DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
+            DELETE FROM mysql.user WHERE User='';
+            DELETE FROM mysql.db WHERE Db='test' OR Db='test\_%';
+            FLUSH PRIVILEGES;
+            EOF
+            
+            mysql -uroot -p$admin_password <<-EOF
+            GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' IDENTIFIED BY '$admin_password' WITH GRANT OPTION;
+            EOF
+            
+            sed -i "s/bind-address.*/bind-address = 0.0.0.0/" /etc/mysql/my.cnf
+            service mysql restart
+            
+            # Download and install OpenBook
+            #wget "http://10.0.2.1:8080/v1/AUTH_7c5852425d864bcc9622967942f2fe56/test-container/Openbook.war" -P /tmp/
+            #wget "http://4697a425bb8fd03f7b24-30f44d71994a2698d571e9be7d46544e.r90.cf1.rackcdn.com/Openbook.war" -P /tmp/
+            #unzip -q /tmp/Openbook.war -d /var/lib/tomcat7/webapps/Openbook
+            #mysql -uroot -p$admin_password < /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/db/MySQL/create_openbook_schemas.sql
+            
+            # Set logo path to be relative so that it uses the https path
+            #mysql -uroot -p$admin_password <<-EOF
+            #UPDATE openbook.t_provider 
+            #SET personalization_settings = '{"logoFileUrl":"/Openbook/static/images/Talligent-logo_small.png"}';
+            #EOF
+            
+            wc_notify --data-binary '{"status": "SUCCESS"}'
+  
+  galera2:
+    type: OS::Nova::Server
+    properties:
+      name: galera2
+      key_name: { get_param: key_name }
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      networks:
+        - network: { get_param: private_net }
+      security_groups: [ { get_resource: security_group } ]
+      user_data_format: RAW
+      user_data:
+        str_replace:
+          params:
+            $admin_password: { get_attr: [administrative_password, value] }
+            wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
+          template: |
+            #!/bin/bash -ex
+            apt-get install software-properties-common
+            apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
+            add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
+            apt-get update
+            
+            export DEBIAN_FRONTEND=noninteractive
+            
+            # configure/confirm the default root password during installation
+            debconf-set-selections <<< 'mariadb-galera-server-10.0 mysql-server/root_password password $admin_password'
+            debconf-set-selections <<< 'mariadb-galera-server-10.0 mysql-server/root_password_again password $admin_password'
+            apt-get -y install mariadb-galera-server galera
+            
+            cat << EOF >> /root/.my.cnf
+            [mysql]
+            user=root
+            password=$admin_password
+            EOF
+            
+            # mysql_secure_installation  # this asks several questions
+            ## Apparently, we can do these queries manually, instead
+            mysql -uroot -p$admin_password <<-EOF
+            DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
+            DELETE FROM mysql.user WHERE User='';
+            DELETE FROM mysql.db WHERE Db='test' OR Db='test\_%';
+            FLUSH PRIVILEGES;
+            EOF
+            
+            mysql -uroot -p$admin_password <<-EOF
+            GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' IDENTIFIED BY '$admin_password' WITH GRANT OPTION;
+            EOF
+            
+            sed -i "s/bind-address.*/bind-address = 0.0.0.0/" /etc/mysql/my.cnf
+            service mysql restart
+            
+            # Download and install OpenBook
+            #wget "http://10.0.2.1:8080/v1/AUTH_7c5852425d864bcc9622967942f2fe56/test-container/Openbook.war" -P /tmp/
+            #wget "http://4697a425bb8fd03f7b24-30f44d71994a2698d571e9be7d46544e.r90.cf1.rackcdn.com/Openbook.war" -P /tmp/
+            #unzip -q /tmp/Openbook.war -d /var/lib/tomcat7/webapps/Openbook
+            #mysql -uroot -p$admin_password < /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/db/MySQL/create_openbook_schemas.sql
+            
+            # Set logo path to be relative so that it uses the https path
+            #mysql -uroot -p$admin_password <<-EOF
+            #UPDATE openbook.t_provider 
+            #SET personalization_settings = '{"logoFileUrl":"/Openbook/static/images/Talligent-logo_small.png"}';
+            #EOF
+            
+            wc_notify --data-binary '{"status": "SUCCESS"}'
+  
+  galera3:
+    type: OS::Nova::Server
+    properties:
+      name: galera3
+      key_name: { get_param: key_name }
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      networks:
+        - network: { get_param: private_net }
+      security_groups: [ { get_resource: security_group } ]
+      user_data_format: RAW
+      user_data:
+        str_replace:
+          params:
+            $admin_password: { get_attr: [administrative_password, value] }
+            wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
+          template: |
+            #!/bin/bash -ex
+            apt-get install software-properties-common
+            apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
+            add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
+            apt-get update
+            
+            export DEBIAN_FRONTEND=noninteractive
+            
+            # configure/confirm the default root password during installation
+            debconf-set-selections <<< 'mariadb-galera-server-10.0 mysql-server/root_password password $admin_password'
+            debconf-set-selections <<< 'mariadb-galera-server-10.0 mysql-server/root_password_again password $admin_password'
+            apt-get -y install mariadb-galera-server galera
+            
+            cat << EOF >> /root/.my.cnf
+            [mysql]
+            user=root
+            password=$admin_password
+            EOF
+            
+            # mysql_secure_installation  # this asks several questions
+            ## Apparently, we can do these queries manually, instead
+            mysql -uroot -p$admin_password <<-EOF
+            DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
+            DELETE FROM mysql.user WHERE User='';
+            DELETE FROM mysql.db WHERE Db='test' OR Db='test\_%';
+            FLUSH PRIVILEGES;
+            EOF
+            
+            mysql -uroot -p$admin_password <<-EOF
+            GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' IDENTIFIED BY '$admin_password' WITH GRANT OPTION;
+            EOF
+            
+            sed -i "s/bind-address.*/bind-address = 0.0.0.0/" /etc/mysql/my.cnf
+            service mysql restart
+            
+            # Download and install OpenBook
+            #wget "http://10.0.2.1:8080/v1/AUTH_7c5852425d864bcc9622967942f2fe56/test-container/Openbook.war" -P /tmp/
+            #wget "http://4697a425bb8fd03f7b24-30f44d71994a2698d571e9be7d46544e.r90.cf1.rackcdn.com/Openbook.war" -P /tmp/
+            #unzip -q /tmp/Openbook.war -d /var/lib/tomcat7/webapps/Openbook
+            #mysql -uroot -p$admin_password < /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/db/MySQL/create_openbook_schemas.sql
+            
+            # Set logo path to be relative so that it uses the https path
+            #mysql -uroot -p$admin_password <<-EOF
+            #UPDATE openbook.t_provider 
+            #SET personalization_settings = '{"logoFileUrl":"/Openbook/static/images/Talligent-logo_small.png"}';
+            #EOF
+            
+            wc_notify --data-binary '{"status": "SUCCESS"}'
+  
+  monitor:
+    type: OS::Neutron::HealthMonitor
+    properties:
+      type: TCP
+      delay: 5
+      max_retries: 5
+      timeout: 5
+  galera_pool:
+    type: OS::Neutron::Pool
+    properties:
+      name: galera-pool
+      protocol: TCP
+      # This is grabbing the subnet from a port created in the private_net
+      subnet: { get_attr: [ port, subnets, 0, id ] }
+      #subnet: { get_param: private_subnet }
+      lb_method: ROUND_ROBIN
+      monitors: [ { get_resource: monitor } ]
+      vip: { protocol_port: 3306 }
+  
+  galera_lb:
+    type: OS::Neutron::LoadBalancer
+    properties:
+      members: [ { get_resource: galera1 }, { get_resource: galera2 }, { get_resource: galera3 } ]
+      pool_id: { get_resource: galera_pool }
+      protocol_port: 3306
+      
+
+outputs:
+  ip:
+    description: The IP address of the galera pool.
+    value: { get_attr: [ galera_pool, vip, address ] }
+  port_data:
+    description: The port data from a port on the private network
+    value: { get_attr: [ port, subnets ] }
+  priv_subnet:
+    description: The private subnet, hopefully
+    value: { get_attr: [ port, subnets, 0, id ] }

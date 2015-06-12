@@ -37,6 +37,10 @@ parameters:
     type: string
     label: Floating IP
     description: Public IP (floating ip) that will be used to access OpenBook.
+  galera_ip:
+    type: string
+    label: Galera IP
+    description: IP address of the Galera cluster load balancer
 
 resources:
   wait_condition:
@@ -86,6 +90,7 @@ resources:
           params:
             wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
             $floating_ip: { get_param: floating_ip }
+            $galera_ip: { get_param: galera_ip }
           template: |
             #!/bin/bash -ex
             apt-get install software-properties-common
@@ -109,7 +114,8 @@ resources:
             #mysql -uroot -p$admin_password < /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/db/MySQL/create_openbook_schemas.sql
             
             # Set the public url for OpenBook
-            sed -ri 's/(ROOT_PROVIDER_PUBLIC_URL = https:\/\/).*/\1$floating_ip:8443/' /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/openbook.properties
+            sed -ri 's/(ROOT_PROVIDER_PUBLIC_URL = https:\/\/).*/\1$floating_ip/' /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/openbook.properties
+            sed -ri 's/(DB_\w+_HOST = ).*/\1$galera_ip/' /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/openbook.properties
             #### ADD THE DB HOST PARTS HERE
             ####
             
