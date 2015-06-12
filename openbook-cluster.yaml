@@ -99,7 +99,6 @@ resources:
           private_net: { get_param: private_net }
           floating_ip: { get_attr: [ floating_ip, floating_ip_address ] }
           galera_ip: { get_attr: [ galera_cluster, ip ] }
-          depends_on: galera_cluster
   
   haproxy:
     type: Lib::MSG::HAProxy
@@ -128,4 +127,6 @@ outputs:
         template: https://host_ip/Openbook
         params:
           host_ip: { get_attr: [ floating_ip, floating_ip_address ] }
-
+  admin_password
+    description: The database password for the galera cluster
+    value: { get_attr: [ galera_cluster, admin_password ] }
