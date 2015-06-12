@@ -47,7 +47,7 @@ parameters:
   version:
     type: string
     label: OpenBook version
-    description: OpenBook version to install (default: latest; ex: Openbook-2.5.083)
+    description: OpenBook version to install (default - latest; ex. Openbook-2.5.083)
     default: latest
 
 resources:
@@ -134,6 +134,6 @@ outputs:
         template: https://host_ip/Openbook
         params:
           host_ip: { get_attr: [ floating_ip, floating_ip_address ] }
-  admin_password
+  admin_password:
     description: The database password for the galera cluster
     value: { get_attr: [ galera_cluster, admin_password ] }

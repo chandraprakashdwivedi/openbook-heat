@@ -43,7 +43,7 @@ parameters:
     description: IP address of the Galera cluster load balancer
   version:
     type: string
-    description: OpenBook version to install (default: latest)
+    description: OpenBook version to install
     default: latest
 
 resources:
