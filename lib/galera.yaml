@@ -121,7 +121,7 @@ resources:
             # configure/confirm the default root password during installation
             debconf-set-selections <<< 'mariadb-galera-server-10.0 mysql-server/root_password password $admin_password'
             debconf-set-selections <<< 'mariadb-galera-server-10.0 mysql-server/root_password_again password $admin_password'
-            apt-get -y install mariadb-galera-server galera
+            apt-get -y install mariadb-galera-server galera unzip ntp
             
             cat << EOF >> /root/.my.cnf
             [mysql]
