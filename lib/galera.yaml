@@ -466,6 +466,6 @@ outputs:
   galera_master:
     description: The Galera master node info
     value:  { get_attr: [galera1, show] }
-  admin_password:
+  admin_pass:
     description: Database password
     value: { get_resource: administrative_password }

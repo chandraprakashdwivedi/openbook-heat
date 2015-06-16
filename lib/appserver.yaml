@@ -45,6 +45,9 @@ parameters:
     type: string
     description: OpenBook version to install
     default: latest
+  admin_password:
+    type: string
+    description: Password to access database as root user
 
 resources:
   wait_condition:
@@ -96,6 +99,7 @@ resources:
             $floating_ip: { get_param: floating_ip }
             $galera_ip: { get_param: galera_ip }
             $version: { get_param: version }
+            $admin_password: { get_param: admin_password }
           template: |
             #!/bin/bash -ex
             apt-get install software-properties-common
@@ -121,8 +125,6 @@ resources:
             # Set the public url for OpenBook
             sed -ri 's/(ROOT_PROVIDER_PUBLIC_URL = https:\/\/).*/\1$floating_ip/' /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/openbook.properties
             sed -ri 's/(DB_\w+_HOST = ).*/\1$galera_ip/' /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/openbook.properties
-            #### ADD THE DB HOST PARTS HERE
-            ####
             
             chown -R tomcat7.tomcat7 /var/lib/tomcat7/webapps/Openbook
             
@@ -130,6 +132,11 @@ resources:
             
             # Sleep a little bit to allow tomcat to finish initial liquibase run for OpenBook
             sleep 60
+            
+            mysql -uroot -p$admin_password <<-EOF
+            UPDATE openbook.t_provider 
+            SET personalization_settings = '{"logoFileUrl":"/Openbook/static/images/Talligent-logo_small.png"}';
+            EOF
             
             wc_notify --data-binary '{"status": "SUCCESS"}'
 outputs:

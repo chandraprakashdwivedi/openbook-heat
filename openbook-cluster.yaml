@@ -106,6 +106,7 @@ resources:
           floating_ip: { get_attr: [ floating_ip, floating_ip_address ] }
           galera_ip: { get_attr: [ galera_cluster, ip ] }
           version: { get_param: version }
+          admin_password: { get_attr: [ galera_cluster, admin_pass ] }
   
   haproxy:
     type: Lib::MSG::HAProxy
