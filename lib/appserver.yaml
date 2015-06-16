@@ -55,7 +55,7 @@ resources:
     properties:
       handle: { get_resource: wait_handle }
       count: 1
-      timeout: 1800
+      timeout: 3600
 
   wait_handle:
     type: OS::Heat::WaitConditionHandle
@@ -133,7 +133,7 @@ resources:
             # Sleep a little bit to allow tomcat to finish initial liquibase run for OpenBook
             sleep 60
             
-            mysql -uroot -p$admin_password <<-EOF
+            mysql -uroot -p$admin_password -h$galera_ip <<-EOF
             UPDATE openbook.t_provider 
             SET personalization_settings = '{"logoFileUrl":"/Openbook/static/images/Talligent-logo_small.png"}';
             EOF
