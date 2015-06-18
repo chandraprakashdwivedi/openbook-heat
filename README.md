@@ -17,6 +17,7 @@ environment.  It requires:
 * a private neutron network (private_net: defaults to 'private')
 * a public/external neutron network (public_net: defaults to 'public')
 * **username and password to the Talligent Sharefile account** (for downloading OpenBook)
+  * to obtain Sharefile access, please e-mail openbook@talligent.com
 
 It creates/assigns:
 * a single instance running all pieces of OpenBook
