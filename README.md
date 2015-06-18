@@ -25,3 +25,14 @@ It creates/assigns:
 * an openbook-group security group
 
 The ouptut will contain the OpenBook user/password and UI address.
+
+Example usage
+-------------
+On a machine with the python-heatclient and this repo (source your keystonerc or include your openstack credentials in the heat call)
+This also assumes that you have a single private network for your tenant named 'private' and a public network named 'public'
+```
+heat -d stack-create openbook-stack-01 \
+  -u https://raw.githubusercontent.com/Talligent/openbook-heat/master/openbook-single.yaml \
+  -e https://raw.githubusercontent.com/Talligent/openbook-heat/master/lib/env.yaml \
+  -P "key_name=<your keypair name>;sharefile_user=<your e-mail>;sharefile_pass=<your sharefile password>"
+```
