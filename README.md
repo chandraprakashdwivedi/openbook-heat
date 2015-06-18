@@ -29,6 +29,7 @@ The ouptut will contain the OpenBook user/password and UI address.
 Example usage
 -------------
 On a machine with the python-heatclient and this repo (source your keystonerc or include your openstack credentials in the heat call)
+
 This also assumes that you have a single private network for your tenant named 'private' and a public network named 'public'
 ```
 heat -d stack-create openbook-stack-01 \
