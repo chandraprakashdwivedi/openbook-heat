@@ -33,10 +33,18 @@ parameters:
     default: private
     constraints:
       - custom_constraint: neutron.network
-  version:
+  sharefile_user:
     type: string
-    description: OpenBook version to install
-    default: latest
+    label: Sharefile Username
+    description: Username for accessing Talligent Sharefile
+  sharefile_pass:
+    type: string
+    label: Sharefile Password
+    description: Password for accessing Talligent Sharefile
+  #version:
+  #  type: string
+  #  description: OpenBook version to install
+  #  default: latest
 
 resources:
   wait_condition:
@@ -105,7 +113,9 @@ resources:
         str_replace:
           params:
             $admin_password: { get_attr: [administrative_password, value] }
-            $version: { get_param: version }
+            #$version: { get_param: version }
+            $sharefile_user: { get_param: sharefile_user }
+            $sharefile_pass: { get_param: sharefile_pass }
             wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
           template: |
             #!/bin/bash -ex
@@ -189,9 +199,17 @@ resources:
             service mysql start --wsrep-new-cluster
             
             # Download and install OpenBook
-            #wget "http://10.0.2.1:8080/v1/AUTH_7c5852425d864bcc9622967942f2fe56/test-container/Openbook.war" -P /tmp/
-            wget "http://4697a425bb8fd03f7b24-30f44d71994a2698d571e9be7d46544e.r90.cf1.rackcdn.com/$version/Openbook.war" -P /tmp/
-            unzip -q /tmp/Openbook.war -d /tmp/Openbook
+            ##wget "http://10.0.2.1:8080/v1/AUTH_7c5852425d864bcc9622967942f2fe56/test-container/Openbook.war" -P /tmp/
+            #wget "http://4697a425bb8fd03f7b24-30f44d71994a2698d571e9be7d46544e.r90.cf1.rackcdn.com/$version/Openbook.war" -P /tmp/
+            #unzip -q /tmp/Openbook.war -d /tmp/Openbook
+            export TOKEN=$(curl -s -X POST "https://talligent.sharefile.com/oauth/token" \
+                         -H "Content-Type: application/x-www-form-urlencoded" \
+                         -d "grant_type=password&client_id=eC8y8eeoeunxzOizZq2oeknIVfA9Jyjg&client_secret=PehmEqzEgKuGm2XOZWXIOUY3GyrKcfSmNtwPptPwt0tWxihs&username=$sharefile_user&password=$sharefile_pass" | python -c 'import sys, json; print json.load(sys.stdin)["access_token"]')
+            export ITEM=$(curl -s -k 'https://talligent.sf-api.com/sf/v3/Items/Search?query=Openbook*.zip' -H "Authorization: Bearer $TOKEN" | python -c 'import sys, json; print json.load(sys.stdin)["Results"][0]["ItemID"]')
+            curl -s -k -L -o "/tmp/Openbook.zip" "https://talligent.sf-api.com/sf/v3/Items($ITEM)/Download" -H "Authorization: Bearer $TOKEN"
+            unzip -q /tmp/Openbook.zip -d /tmp
+            unzip -q /tmp/Openbook-*/Openbook.war -d /tmp/Openbook
+            
             mysql -uroot -p$admin_password < /tmp/Openbook/WEB-INF/classes/db/MySQL/create_openbook_schemas.sql
             
             # Set logo path to be relative so that it uses the https path
