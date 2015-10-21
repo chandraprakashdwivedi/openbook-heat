@@ -1,0 +1,19 @@
+name: Openbook
+release: 1.0
+logo: assets/logo.png
+
+short_desc: |
+  RPC-Heat-Openbook delivers a deployable configuration of Openbook 2.5 using OpenStack Orchestration (heat) that is available in any Rackspace OpenStack Private Cloud.
+long_desc: |
+  Openbook is a fully-functional, simple to use cloud management solution that has been built specifically for OpenStack. It allows users to measure, manage, and monetize clouds built on OpenStack.
+
+architecture: |
+  Openbook is delivered as a single, stand-alone instace running both the front-end (Tomcat) and back-end (MariaDB).
+
+design_specs:
+  - MariaDB is installed as the back-end database service.
+  - Tomcat 7 is installed as the front-end application server.
+  - The Openbook UI is configured to run over SSL and a self-signed certificate is created during deployment.
+
+heat_template: openbook-single.yaml
+env_file: lib/env.yaml
