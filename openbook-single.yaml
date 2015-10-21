@@ -9,8 +9,18 @@ description: >
   Talligent Heat template for deploying a single node
   OpenBook instance.
 
+parameter_groups:
+- parameters
+  - keyname
+  - flavor
+  - image
+  - private_net
+  - public_net
+  - sharefile_user
+  - sharefile_pass
+
 parameters:
-  key_name:
+  keyname:
     type: string
     description: Name of an existing key pair to use for the server
     constraints:
@@ -24,7 +34,6 @@ parameters:
   image:
     type: string
     description: Image ID or image name to use for the server
-    default: ubuntu-14.04
     constraints:
       - custom_constraint: glance.image
   private_net:
@@ -47,6 +56,7 @@ parameters:
     type: string
     label: Sharefile Password
     description: Password for accessing Talligent Sharefile
+    hidden: true
 
 resources:
   wait_condition:
@@ -97,7 +107,7 @@ resources:
     type: OS::Nova::Server
     properties:
       name: openbook-01
-      key_name: { get_param: key_name }
+      keyname: { get_param: keyname }
       image: { get_param: image }
       flavor: { get_param: flavor }
       networks:
