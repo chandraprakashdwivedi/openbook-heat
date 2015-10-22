@@ -10,7 +10,7 @@ description: >
   OpenBook instance.
 
 parameter_groups:
-- parameters
+- parameters:
   - keyname
   - flavor
   - image
