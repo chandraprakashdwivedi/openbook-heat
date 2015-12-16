@@ -195,7 +195,8 @@ resources:
             export TOKEN=$(curl -s -X POST "https://talligent.sharefile.com/oauth/token" \
                          -H "Content-Type: application/x-www-form-urlencoded" \
                          -d "grant_type=password&client_id=eC8y8eeoeunxzOizZq2oeknIVfA9Jyjg&client_secret=PehmEqzEgKuGm2XOZWXIOUY3GyrKcfSmNtwPptPwt0tWxihs&username=$sharefile_user&password=$sharefile_pass" | python -c 'import sys, json; print json.load(sys.stdin)["access_token"]')
-            export ITEM=$(curl -s -k 'https://talligent.sf-api.com/sf/v3/Items/Search?query=.zip' -H "Authorization: Bearer $TOKEN" | python -c 'import sys, json; print json.load(sys.stdin)["Results"][0]["ItemID"]')
+            #export ITEM=$(curl -s -k 'https://talligent.sf-api.com/sf/v3/Items/Search?query=.zip' -H "Authorization: Bearer $TOKEN" | python -c 'import sys, json; print json.load(sys.stdin)["Results"][0]["ItemID"]')
+            export ITEM=$(curl -s -k 'https://talligent.sharefile.com/sf/v3/Items/AdvancedSearch' -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" --data-binary '{"Query":{"SearchQuery":"zip","ItemTypes":null,"CreateStartDate":null,"CreateEndDate":null,"ItemNameOnly":true,"ParentID":[],"CreatorID":[]}}' | python -c 'import sys, json; print json.load(sys.stdin)["Results"][0]["ItemID"]')
             curl -s -k -L -o "/tmp/Openbook.zip" "https://talligent.sf-api.com/sf/v3/Items($ITEM)/Download" -H "Authorization: Bearer $TOKEN"
             unzip -q /tmp/Openbook.zip -d /tmp
             unzip -q /tmp/Openbook-*/Openbook.war -d /var/lib/tomcat7/webapps/Openbook
