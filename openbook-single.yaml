@@ -133,7 +133,8 @@ resources:
             apt-get update
             
             # Install OpenJDK 8
-            apt-get install -y openjdk-8-jre-headless
+            #apt-get install -y openjdk-8-jre-headless
+            apt-get install -y openjdk-8-jdk
             ln -s /usr/lib/jvm/java-8-openjdk-amd64 /usr/lib/jvm/default-java
             
             # MariaDB
@@ -159,10 +160,17 @@ resources:
             FLUSH PRIVILEGES;
             EOF
             
+            # Set binglog format to MIXED (defaults to STATEMENT)
+            sed -i "/\[mysqld\]/a\binlog_format = MIXED" /etc/mysql/my.cnf
+            service mysql restart
+            
             ### TOMCAT ###
             apt-get install -y tomcat7 mariadb-client-core-10.0 ntp unzip
-            #sed -i 's/^jdk.tls.disabledAlgorithms=SSLv3/#jdk.tls.disabledAlgorithms=SSLv3/' /etc/java-7-openjdk/security/java.policy
-            sed -i 's/Xmx.*\ /Xmx2048m /g' /etc/default/tomcat7
+            # Set the max heap size
+            JVM_HEAP_PERCENT=50
+            TOTAL_MEM=$(free -m | awk '/Mem:/ {print $2}')
+            let JVM_HEAP=$TOTAL_MEM*$JVM_HEAP_PERCENT/100
+            sed -i "s/Xmx.*\ /Xmx${JVM_HEAP}m /g" /etc/default/tomcat7
             sed -i '/^JAVA_OPTS/ s/"$/ -Djsse.enableSNIExtension=false -Djava.security.egd=file:\/dev\/urandom"/g' /etc/default/tomcat7
             #echo "JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64" >> /etc/default/tomcat7
             
