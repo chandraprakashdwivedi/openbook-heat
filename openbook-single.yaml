@@ -124,6 +124,8 @@ resources:
           template: |
             #!/bin/bash -ex
             
+            echo "$floating_ip  $(hostname)" >> /etc/hosts
+            
             # Add MariaDB and OpenJDK 8 repos
             apt-get install software-properties-common
             apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
@@ -172,24 +174,25 @@ resources:
             let JVM_HEAP=$TOTAL_MEM*$JVM_HEAP_PERCENT/100
             sed -i "s/Xmx.*\ /Xmx${JVM_HEAP}m /g" /etc/default/tomcat7
             sed -i '/^JAVA_OPTS/ s/"$/ -Djsse.enableSNIExtension=false -Djava.security.egd=file:\/dev\/urandom"/g' /etc/default/tomcat7
-            #echo "JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64" >> /etc/default/tomcat7
             
             # Generate key
             keytool -genkey -keyalg RSA -alias tomcat \
-            -dname "CN=talligent.net, O=Talligent, L=Austin, S=Texas, C=US" \
-            -keystore /etc/tomcat7/keystore.jks \
-            -storepass $admin_password \
+            -dname "CN=$(hostname), O=Talligent, L=Austin, S=Texas, C=US" \
+            -keystore /etc/ssl/certs/java/cacerts \
+            -storepass changeit \
             -validity 360 \
             -keysize 2048 \
-            -keypass $admin_password
+            -keypass changeit
+            
+            
             
             # Enable 8443 for tomcat
             cat << EOF >> /tmp/tomcat-ssl.patch
             87d86
             <     <!--
             89a89,90
-            >                keystoreFile="/etc/tomcat7/keystore.jks"
-            >                keystorePass="$admin_password"
+            >                keystoreFile="/etc/ssl/certs/java/cacerts"
+            >                keystorePass="changeit"
             91d91
             <     -->
             EOF
