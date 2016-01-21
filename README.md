@@ -2,10 +2,10 @@
 
 Description
 ===========
-This is a collection of Heat templates for deploying Talligent's OpenBook
+This is a collection of Heat templates for deploying Talligent's Openbook
 billing/invoicing and customer lifecycle management software for OpenStack.
-One template is for OpenBook evaluation purposes (openbook-single.yaml),
-while the other is for deploying a production-ready OpenBook (openbook-cluster.yaml)
+One template is for Openbook evaluation purposes (openbook-single.yaml),
+while the other is for deploying a production-ready Openbook (openbook-cluster.yaml)
 
 openbook-single
 ===============
@@ -16,15 +16,15 @@ environment.  It requires:
 * an Ubuntu 14.04 server glance image (image: defaults to 'ubuntu-14.04')
 * a private neutron network (private_net: defaults to 'private')
 * a public/external neutron network (public_net: defaults to 'public')
-* **username and password to the Talligent Sharefile account** (for downloading OpenBook)
+* **username and password to the Talligent Sharefile account** (for downloading Openbook)
   * to obtain Sharefile access, please e-mail openbook@talligent.com
 
 It creates/assigns:
-* a single instance running all pieces of OpenBook
+* a single instance running all pieces of Openbook
 * a floating IP from the public pool
 * an openbook-group security group
 
-The ouptut will contain the OpenBook user/password and UI address.
+The ouptut will contain the Openbook user/password and UI address.
 
 Example usage
 -------------
