@@ -1,13 +1,13 @@
 #
-# This is a Talligent Heat template for deploying OpenBook.
-# Default user/pass for the OpenBook UI is: openbook / Tall!gent
+# This is a Talligent Heat template for deploying Openbook.
+# Default user/pass for the Openbook UI is: openbook / Tall!gent
 # supports Juno, Kilo
 
 heat_template_version: 2013-05-23
 
 description: >
   Talligent Heat template for deploying a single node
-  OpenBook instance.
+  Openbook instance.
 
 parameter_groups:
 - parameters:
@@ -76,7 +76,7 @@ resources:
     type: OS::Neutron::SecurityGroup
     properties:
       name: openbook-group
-      description: Enable access to OpenBook and SSH access
+      description: Enable access to Openbook and SSH access
       rules:
         - remote_ip_prefix: 0.0.0.0/0
           protocol: tcp
@@ -138,6 +138,7 @@ resources:
             #apt-get install -y openjdk-8-jre-headless
             apt-get install -y openjdk-8-jdk
             ln -s /usr/lib/jvm/java-8-openjdk-amd64 /usr/lib/jvm/default-java
+            update-ca-certificates -f
             
             # MariaDB
             export DEBIAN_FRONTEND=noninteractive
@@ -202,7 +203,7 @@ resources:
             rm -rf /var/lib/tomcat7/webapps/ROOT
             service tomcat7 stop
             
-            # Download and install OpenBook
+            # Download and install Openbook
             export TOKEN=$(curl -s -X POST "https://talligent.sharefile.com/oauth/token" \
                          -H "Content-Type: application/x-www-form-urlencoded" \
                          -d "grant_type=password&client_id=eC8y8eeoeunxzOizZq2oeknIVfA9Jyjg&client_secret=PehmEqzEgKuGm2XOZWXIOUY3GyrKcfSmNtwPptPwt0tWxihs&username=$sharefile_user&password=$sharefile_pass" | python -c 'import sys, json; print json.load(sys.stdin)["access_token"]')
@@ -214,32 +215,26 @@ resources:
             
             mysql -uroot -p$admin_password < /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/db/MySQL/create_openbook_schemas.sql
             
-            # Set the public url for OpenBook
-            sed -ri 's/(ROOT_PROVIDER_PUBLIC_URL = https:\/\/).*/\1$floating_ip:8443/' /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/openbook.properties
+            # Set the public url for Openbook
+            #sed -ri 's/(ROOT_PROVIDER_PUBLIC_URL = https:\/\/).*/\1$floating_ip:8443/' /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/openbook.properties
             chown -R tomcat7.tomcat7 /var/lib/tomcat7/webapps/Openbook
             
             service tomcat7 start
             
-            # Sleep a little bit to allow tomcat to finish initial liquibase run for OpenBook
+            # Sleep a little bit to allow tomcat to finish initial liquibase run for Openbook
             sleep 60
-            
-            # Set logo path to be relative so that it uses the https path
-            mysql -uroot -p$admin_password <<-EOF
-            UPDATE openbook.t_provider 
-            SET personalization_settings = '{"logoFileUrl":"/Openbook/static/images/Talligent-logo_small.png"}';
-            EOF
             
             wc_notify --data-binary '{"status": "SUCCESS"}'
 
 outputs:
-  OpenBook_admin:
-    description: OpenBook administrative user
+  Openbook_admin:
+    description: Openbook administrative user
     value: openbook
-  OpenBook_admin_password:
-    description: OpenBook administrative user password
+  Openbook_admin_password:
+    description: Openbook administrative user password
     value: Tall!g3nt
-  OpenBook_URL:
-    description: The URL to access the OpenBook UI
+  Openbook_URL:
+    description: The URL to access the Openbook UI
     value:
       str_replace:
         template: https://host_ip:8443/Openbook
