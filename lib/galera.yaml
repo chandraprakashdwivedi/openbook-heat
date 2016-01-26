@@ -1,12 +1,12 @@
 #
-# This is a Talligent Heat template for deploying OpenBook.
-# Default user/pass for the OpenBook UI is: openbook / Tall!gent
+# This is a Talligent Heat template for deploying Openbook.
+# Default user/pass for the Openbook UI is: openbook / Tall!gent
 # supports Juno, Kilo
 
 heat_template_version: 2013-05-23
 
 description: >
-  Talligent Heat template for deploying OpenBook in a
+  Talligent Heat template for deploying Openbook in a
   cluster scenario.
 
 parameters:
@@ -37,14 +37,17 @@ parameters:
     type: string
     label: Sharefile Username
     description: Username for accessing Talligent Sharefile
+    default: none
   sharefile_pass:
     type: string
     label: Sharefile Password
     description: Password for accessing Talligent Sharefile
-  #version:
-  #  type: string
-  #  description: OpenBook version to install
-  #  default: latest
+    default: none
+  alt_download_url:
+    type: string
+    label: Alternate Openbook download URL
+    description: Alternative download location of Openbook zip if Sharefile credentials are not provided
+    default: none
 
 resources:
   wait_condition:
@@ -64,7 +67,7 @@ resources:
     type: OS::Neutron::SecurityGroup
     properties:
       name: openbook-galera
-      description: Enable access to OpenBook and SSH access
+      description: Enable access to Openbook and SSH access
       rules:
         - remote_ip_prefix: 0.0.0.0/0
           protocol: tcp
@@ -113,25 +116,31 @@ resources:
         str_replace:
           params:
             $admin_password: { get_attr: [administrative_password, value] }
-            #$version: { get_param: version }
             $sharefile_user: { get_param: sharefile_user }
             $sharefile_pass: { get_param: sharefile_pass }
+            $alt_download_url: { get_param: alt_download_url }
             wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
           template: |
             #!/bin/bash -ex
-            my_ip=$(hostname -I | sed 's/ //g')
+            my_ip=$(curl http://169.254.169.254/2009-04-04/meta-data/local-ipv4)
             master_ip=$my_ip
-            apt-get install software-properties-common
-            apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
-            add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
-            apt-get update
+            echo "$my_ip  $(hostname)" >> /etc/hosts
+            
+            # Check for mariadb availability before adding key and repo
+            MARIADB_AVAILABLE=$(aptitude -F "%p" search mariadb-galera-server-10.0)
+            if [ "" == "$MARIADB_AVAILABLE" ]; then
+                apt-get install software-properties-common
+                apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
+                add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
+                apt-get update
+            fi
             
             export DEBIAN_FRONTEND=noninteractive
             
             # configure/confirm the default root password during installation
-            debconf-set-selections <<< 'mariadb-galera-server-10.0 mysql-server/root_password password $admin_password'
-            debconf-set-selections <<< 'mariadb-galera-server-10.0 mysql-server/root_password_again password $admin_password'
-            apt-get -y install mariadb-galera-server galera unzip ntp
+            debconf-set-selections <<< "mariadb-galera-server-10.0 mysql-server/root_password password $admin_password"
+            debconf-set-selections <<< "mariadb-galera-server-10.0 mysql-server/root_password_again password $admin_password"
+            apt-get -y install mariadb-galera-server-10.0 galera unzip ntp
             
             cat << EOF >> /root/.my.cnf
             [mysql]
@@ -196,27 +205,28 @@ resources:
             EOF
             
             service mysql stop
-            service mysql start --wsrep-new-cluster
+            service mysql bootstrap
             
-            # Download and install OpenBook
-            ##wget "http://10.0.2.1:8080/v1/AUTH_7c5852425d864bcc9622967942f2fe56/test-container/Openbook.war" -P /tmp/
-            #wget "http://4697a425bb8fd03f7b24-30f44d71994a2698d571e9be7d46544e.r90.cf1.rackcdn.com/$version/Openbook.war" -P /tmp/
-            #unzip -q /tmp/Openbook.war -d /tmp/Openbook
-            export TOKEN=$(curl -s -X POST "https://talligent.sharefile.com/oauth/token" \
-                         -H "Content-Type: application/x-www-form-urlencoded" \
-                         -d "grant_type=password&client_id=eC8y8eeoeunxzOizZq2oeknIVfA9Jyjg&client_secret=PehmEqzEgKuGm2XOZWXIOUY3GyrKcfSmNtwPptPwt0tWxihs&username=$sharefile_user&password=$sharefile_pass" | python -c 'import sys, json; print json.load(sys.stdin)["access_token"]')
-            export ITEM=$(curl -s -k 'https://talligent.sf-api.com/sf/v3/Items/Search?query=.zip' -H "Authorization: Bearer $TOKEN" | python -c 'import sys, json; print json.load(sys.stdin)["Results"][0]["ItemID"]')
-            curl -s -k -L -o "/tmp/Openbook.zip" "https://talligent.sf-api.com/sf/v3/Items($ITEM)/Download" -H "Authorization: Bearer $TOKEN"
-            unzip -q /tmp/Openbook.zip -d /tmp
+            # Download and install Openbook
+            # Check for alternate download URL first
+            if [ "none" != "$alt_download_url" ]; then
+                if [[ "$alt_download_url" =~ "Openbook" ]]; then
+                    wget -q "$alt_download_url" -P "/tmp/"
+                else
+                    wget -q -r "$alt_download_url" -P "/tmp/"
+                    mv /tmp/$(echo $alt_download_url | awk -F\/ '{print $3}')/Openbook*.zip /tmp/
+                fi
+            else
+                export TOKEN=$(curl -s -X POST "https://talligent.sharefile.com/oauth/token" \
+                             -H "Content-Type: application/x-www-form-urlencoded" \
+                             -d "grant_type=password&client_id=eC8y8eeoeunxzOizZq2oeknIVfA9Jyjg&client_secret=PehmEqzEgKuGm2XOZWXIOUY3GyrKcfSmNtwPptPwt0tWxihs&username=$sharefile_user&password=$sharefile_pass" | python -c 'import sys, json; print json.load(sys.stdin)["access_token"]')
+                export ITEM=$(curl -s -k 'https://talligent.sf-api.com/sf/v3/Items/Search?query=.zip' -H "Authorization: Bearer $TOKEN" | python -c 'import sys, json; print json.load(sys.stdin)["Results"][0]["ItemID"]')
+                curl -s -k -L -o "/tmp/Openbook.zip" "https://talligent.sf-api.com/sf/v3/Items($ITEM)/Download" -H "Authorization: Bearer $TOKEN"
+            fi
+            unzip -q /tmp/Openbook*.zip -d /tmp
             unzip -q /tmp/Openbook-*/Openbook.war -d /tmp/Openbook
             
             mysql -uroot -p$admin_password < /tmp/Openbook/WEB-INF/classes/db/MySQL/create_openbook_schemas.sql
-            
-            # Set logo path to be relative so that it uses the https path
-            mysql -uroot -p$admin_password <<-EOF
-            UPDATE openbook.t_provider 
-            SET personalization_settings = '{"logoFileUrl":"/Openbook/static/images/Talligent-logo_small.png"}';
-            EOF
             
             wc_notify --data-binary '{"status": "SUCCESS"}'
   
@@ -239,19 +249,24 @@ resources:
             wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
           template: |
             #!/bin/bash -ex
-            my_ip=$(hostname -I | sed 's/ //g')
+            my_ip=$(curl http://169.254.169.254/2009-04-04/meta-data/local-ipv4)
+            echo "$my_ip  $(hostname)" >> /etc/hosts
             
-            apt-get install software-properties-common
-            apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
-            add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
-            apt-get update
+            # Check for mariadb availability before adding key and repo
+            MARIADB_AVAILABLE=$(aptitude -F "%p" search mariadb-galera-server-10.0)
+            if [ "" == "$MARIADB_AVAILABLE" ]; then
+                apt-get install software-properties-common
+                apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
+                add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
+                apt-get update
+            fi
             
             export DEBIAN_FRONTEND=noninteractive
             
             # configure/confirm the default root password during installation
-            debconf-set-selections <<< 'mariadb-galera-server-10.0 mysql-server/root_password password $admin_password'
-            debconf-set-selections <<< 'mariadb-galera-server-10.0 mysql-server/root_password_again password $admin_password'
-            apt-get -y install mariadb-galera-server galera
+            debconf-set-selections <<< "mariadb-galera-server-10.0 mysql-server/root_password password $admin_password"
+            debconf-set-selections <<< "mariadb-galera-server-10.0 mysql-server/root_password_again password $admin_password"
+            apt-get -y install mariadb-galera-server-10.0 galera unzip ntp
             
             cat << EOF >> /root/.my.cnf
             [mysql]
@@ -317,18 +332,6 @@ resources:
             
             service mysql restart
             
-            # Download and install OpenBook
-            #wget "http://10.0.2.1:8080/v1/AUTH_7c5852425d864bcc9622967942f2fe56/test-container/Openbook.war" -P /tmp/
-            #wget "http://4697a425bb8fd03f7b24-30f44d71994a2698d571e9be7d46544e.r90.cf1.rackcdn.com/Openbook.war" -P /tmp/
-            #unzip -q /tmp/Openbook.war -d /var/lib/tomcat7/webapps/Openbook
-            #mysql -uroot -p$admin_password < /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/db/MySQL/create_openbook_schemas.sql
-            
-            # Set logo path to be relative so that it uses the https path
-            #mysql -uroot -p$admin_password <<-EOF
-            #UPDATE openbook.t_provider 
-            #SET personalization_settings = '{"logoFileUrl":"/Openbook/static/images/Talligent-logo_small.png"}';
-            #EOF
-            
             wc_notify --data-binary '{"status": "SUCCESS"}'
   
   galera3:
@@ -350,18 +353,24 @@ resources:
             wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
           template: |
             #!/bin/bash -ex
-            my_ip=$(hostname -I | sed 's/ //g')
-            apt-get install software-properties-common
-            apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
-            add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
-            apt-get update
+            my_ip=$(curl http://169.254.169.254/2009-04-04/meta-data/local-ipv4)
+            echo "$my_ip  $(hostname)" >> /etc/hosts
+            
+            # Check for mariadb availability before adding key and repo
+            MARIADB_AVAILABLE=$(aptitude -F "%p" search mariadb-galera-server-10.0)
+            if [ "" == "$MARIADB_AVAILABLE" ]; then
+                apt-get install software-properties-common
+                apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
+                add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
+                apt-get update
+            fi
             
             export DEBIAN_FRONTEND=noninteractive
             
             # configure/confirm the default root password during installation
-            debconf-set-selections <<< 'mariadb-galera-server-10.0 mysql-server/root_password password $admin_password'
-            debconf-set-selections <<< 'mariadb-galera-server-10.0 mysql-server/root_password_again password $admin_password'
-            apt-get -y install mariadb-galera-server galera
+            debconf-set-selections <<< "mariadb-galera-server-10.0 mysql-server/root_password password $admin_password"
+            debconf-set-selections <<< "mariadb-galera-server-10.0 mysql-server/root_password_again password $admin_password"
+            apt-get -y install mariadb-galera-server-10.0 galera unzip ntp
             
             cat << EOF >> /root/.my.cnf
             [mysql]
@@ -429,18 +438,6 @@ resources:
             #################
             # MIGHT NEED TO THROW IN A mysql query check to see if the first node is full up
             service mysql restart
-            
-            # Download and install OpenBook
-            #wget "http://10.0.2.1:8080/v1/AUTH_7c5852425d864bcc9622967942f2fe56/test-container/Openbook.war" -P /tmp/
-            #wget "http://4697a425bb8fd03f7b24-30f44d71994a2698d571e9be7d46544e.r90.cf1.rackcdn.com/Openbook.war" -P /tmp/
-            #unzip -q /tmp/Openbook.war -d /var/lib/tomcat7/webapps/Openbook
-            #mysql -uroot -p$admin_password < /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/db/MySQL/create_openbook_schemas.sql
-            
-            # Set logo path to be relative so that it uses the https path
-            #mysql -uroot -p$admin_password <<-EOF
-            #UPDATE openbook.t_provider 
-            #SET personalization_settings = '{"logoFileUrl":"/Openbook/static/images/Talligent-logo_small.png"}';
-            #EOF
             
             wc_notify --data-binary '{"status": "SUCCESS"}'
   

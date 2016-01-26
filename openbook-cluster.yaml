@@ -1,12 +1,12 @@
 #
-# This is a Talligent Heat template for deploying OpenBook.
-# Default user/pass for the OpenBook UI is: openbook / Tall!gent
+# This is a Talligent Heat template for deploying Openbook.
+# Default user/pass for the Openbook UI is: openbook / Tall!gent
 # supports Juno, Kilo
 
 heat_template_version: 2013-05-23
 
 description: >
-  Talligent Heat template for deploying OpenBook in a
+  Talligent Heat template for deploying Openbook in a
   cluster scenario.
 
 parameters:
@@ -48,22 +48,24 @@ parameters:
     type: string
     label: Sharefile Username
     description: Username for accessing Talligent Sharefile
+    default: none
   sharefile_pass:
     type: string
     label: Sharefile Password
     description: Password for accessing Talligent Sharefile
-  #version:
-  #  type: string
-  #  label: OpenBook version
-  #  description: OpenBook version to install (default - latest; ex. Openbook-2.5.083)
-  #  default: latest
+    default: none
+  alt_download_url:
+    type: string
+    label: Alternate Openbook download URL
+    description: Alternative download location of Openbook zip if Sharefile credentials are not provided
+    default: none
 
 resources:
   security_group:
     type: OS::Neutron::SecurityGroup
     properties:
       name: openbook-group
-      description: Enable access to OpenBook and SSH access
+      description: Enable access to Openbook and SSH access
       rules:
         - remote_ip_prefix: 0.0.0.0/0
           protocol: tcp
@@ -100,7 +102,7 @@ resources:
       private_net: { get_param: private_net }
       sharefile_user: { get_param: sharefile_user }
       sharefile_pass: { get_param: sharefile_pass }
-      #version: { get_param: version }
+      alt_download_url: { get_param: alt_download_url }
     
   openbook_cluster:
     type: OS::Heat::ResourceGroup
@@ -117,7 +119,7 @@ resources:
           galera_ip: { get_attr: [ galera_cluster, ip ] }
           sharefile_user: { get_param: sharefile_user }
           sharefile_pass: { get_param: sharefile_pass }
-          #version: { get_param: version }
+          alt_download_url: { get_param: alt_download_url }
           admin_password: { get_attr: [ galera_cluster, admin_pass ] }
   
   haproxy:
@@ -129,14 +131,14 @@ resources:
       servers: { get_attr: [openbook_cluster, ip] }
 
 outputs:
-  OpenBook_admin:
-    description: OpenBook administrative user
+  Openbook_admin:
+    description: Openbook administrative user
     value: openbook
-  OpenBook_admin_password:
-    description: OpenBook administrative user password
+  Openbook_admin_password:
+    description: Openbook administrative user password
     value: Tall!g3nt
-  OpenBook_URL:
-    description: The URL to access the OpenBook UI
+  Openbook_URL:
+    description: The URL to access the Openbook UI
     value:
       str_replace:
         template: https://host_ip/Openbook

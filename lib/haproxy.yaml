@@ -1,12 +1,12 @@
 #
-# This is a Talligent Heat template for deploying OpenBook.
-# Default user/pass for the OpenBook UI is: openbook / Tall!gent
+# This is a Talligent Heat template for deploying Openbook.
+# Default user/pass for the Openbook UI is: openbook / Tall!gent
 # supports Juno, Kilo
 
 heat_template_version: 2013-05-23
 
 description: >
-  Talligent Heat template for deploying OpenBook in a
+  Talligent Heat template for deploying Openbook in a
   cluster scenario.
 
 parameters:
@@ -50,7 +50,7 @@ resources:
     type: OS::Neutron::SecurityGroup
     properties:
       name: openbook-haproxy
-      description: Enable access to OpenBook and SSH access
+      description: Enable access to Openbook and SSH access
       rules:
         - remote_ip_prefix: 0.0.0.0/0
           protocol: tcp
@@ -78,7 +78,12 @@ resources:
             wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
           template: |
             #!/bin/bash -ex
-            add-apt-repository -y ppa:vbernat/haproxy-1.5
+            echo "$(curl http://169.254.169.254/2009-04-04/meta-data/local-ipv4)  $(hostname)" >> /etc/hosts
+            
+            # Check which version of haproxy is available, add repo if it's not 1.5+
+            if [[ ! "$(aptitude versions ^haproxy$ | awk '{if (NR!=1) {print $2}}')" =~ ^1.5 ]]; then
+                add-apt-repository -y ppa:vbernat/haproxy-1.5
+            fi
             apt-get update
             aptitude install -y haproxy
             
@@ -159,6 +164,10 @@ resources:
             echo "* * * * * curl -s http://169.254.169.254/openstack/latest/meta_data.json | python /etc/haproxy/update.py | /usr/bin/logger -t haproxy_update" >>_crontab
             crontab <_crontab
             rm _crontab
+            
+            # Restart haproxy
+            sleep 60
+            service haproxy restart
             
             wc_notify --data-binary '{"status": "SUCCESS"}'
 
