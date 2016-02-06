@@ -125,22 +125,59 @@ resources:
             my_ip=$(curl http://169.254.169.254/2009-04-04/meta-data/local-ipv4)
             master_ip=$my_ip
             echo "$my_ip  $(hostname)" >> /etc/hosts
-            
-            # Check for mariadb availability before adding key and repo
-            MARIADB_AVAILABLE=$(aptitude -F "%p" search mariadb-galera-server-10.0)
-            if [ "" == "$MARIADB_AVAILABLE" ]; then
-                apt-get install software-properties-common
-                apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
-                add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
-                apt-get update
+            if [ -f /etc/lsb-release ]; then
+              DISTRO="Ubuntu"
+            elif [ -f /etc/redhat-release ]; then
+              DISTRO="CentOS"
+            else
+              echo "Unable to determine if Ubuntu or CentOS"
+              exit 1
             fi
             
-            export DEBIAN_FRONTEND=noninteractive
-            
-            # configure/confirm the default root password during installation
-            debconf-set-selections <<< "mariadb-galera-server-10.0 mysql-server/root_password password $admin_password"
-            debconf-set-selections <<< "mariadb-galera-server-10.0 mysql-server/root_password_again password $admin_password"
-            apt-get -y install mariadb-galera-server-10.0 galera unzip ntp
+            case $DISTRO in
+                'Ubuntu')
+                    MYSQL_CONF_DIR='/etc/mysql/conf.d'
+                    WSREP_PROVIDER='/usr/lib/galera/libgalera_smm.so'
+                    
+                    # Check for mariadb availability before adding key and repo
+                    MARIADB_AVAILABLE=$(aptitude -F "%p" search mariadb-galera-server-10.0)
+                    if [ "" == "$MARIADB_AVAILABLE" ]; then
+                        apt-get install software-properties-common
+                        apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
+                        add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
+                        apt-get update
+                    fi
+                    
+                    export DEBIAN_FRONTEND=noninteractive
+                    
+                    # configure/confirm the default root password during installation
+                    debconf-set-selections <<< "mariadb-galera-server-10.0 mysql-server/root_password password $admin_password"
+                    debconf-set-selections <<< "mariadb-galera-server-10.0 mysql-server/root_password_again password $admin_password"
+                    apt-get -y install mariadb-galera-server-10.0 galera unzip ntp
+                    ;;
+                'CentOS')
+                    MYSQL_CONF_DIR='/etc/my.cnf.d'
+                    WSREP_PROVIDER='/usr/lib64/galera/libgalera_smm.so'
+                    
+                    cat << EOF >> /etc/yum.repos.d/MariaDB.repo
+                    [mariadb]
+                    name = MariaDB
+                    baseurl = http://yum.mariadb.org/10.1/centos7-amd64
+                    gpgkey=https://yum.mariadb.org/RPM-GPG-KEY-MariaDB
+                    gpgcheck=1
+            EOF
+                    sed -i 's/^        //g' /etc/yum.repos.d/MariaDB.repo
+                    
+                    yum -y install MariaDB-server MariaDB-client wget unzip ntp
+                    systemctl start mariadb
+                    mysql -uroot mysql <<-EOF
+                    update user set password=password('$admin_password') where user='root';
+                    flush privileges;
+            EOF
+
+                    
+                    ;;
+            esac
             
             cat << EOF >> /root/.my.cnf
             [mysql]
@@ -164,48 +201,81 @@ resources:
             
             #service mysql stop
             
-            cat << EOF >> /etc/mysql/conf.d/cluster.cnf
-            [mysqld]
-            query_cache_size=0
-            binlog_format=ROW
-            default-storage-engine=innodb
-            innodb_autoinc_lock_mode=2
-            query_cache_type=0
-            bind-address=0.0.0.0
-            
-            # Galera Provider Configuration
-            wsrep_provider=/usr/lib/galera/libgalera_smm.so
-            
-            # Galera Cluster Configuration
-            wsrep_cluster_name="openbook_cluster"
-            wsrep_cluster_address="gcomm://$master_ip"
-            
-            # Galera Synchronization Congifuration
-            wsrep_sst_method=rsync
-            
-            # Galera Node Configuration
-            wsrep_node_address="$my_ip"
-            wsrep_node_name="galera1"
+            if [[ "$DISTRO" == "Ubuntu" ]]; then
+                cat << EOF >> $MYSQL_CONF_DIR/cluster.cnf
+                [mysqld]
+                query_cache_size=0
+                binlog_format=ROW
+                default-storage-engine=innodb
+                innodb_autoinc_lock_mode=2
+                query_cache_type=0
+                bind-address=0.0.0.0
+                
+                # Galera Provider Configuration
+                wsrep_provider=$WSREP_PROVIDER
+                
+                # Galera Cluster Configuration
+                wsrep_cluster_name="openbook_cluster"
+                wsrep_cluster_address="gcomm://$master_ip"
+                
+                # Galera Synchronization Congifuration
+                wsrep_sst_method=rsync
+                
+                # Galera Node Configuration
+                wsrep_node_address="$my_ip"
+                wsrep_node_name="galera1"
             EOF
             
             #sed -i "s/bind-address.*/bind-address = 0.0.0.0/" /etc/mysql/my.cnf
             
-            cat << EOF > /etc/mysql/debian.cnf
-            [client]
-            host     = localhost
-            user     = debian-sys-maint
-            password = $admin_password
-            socket   = /var/run/mysqld/mysqld.sock
-            [mysql_upgrade]
-            host     = localhost
-            user     = debian-sys-maint
-            password = $admin_password
-            socket   = /var/run/mysqld/mysqld.sock
-            basedir  = /usr
+                cat << EOF > /etc/mysql/debian.cnf
+                [client]
+                host     = localhost
+                user     = debian-sys-maint
+                password = $admin_password
+                socket   = /var/run/mysqld/mysqld.sock
+                [mysql_upgrade]
+                host     = localhost
+                user     = debian-sys-maint
+                password = $admin_password
+                socket   = /var/run/mysqld/mysqld.sock
+                basedir  = /usr
             EOF
-            
-            service mysql stop
-            service mysql bootstrap
+                sed -i 's/^    //g' /etc/mysql/debian.cnf
+                
+                service mysql stop
+                service mysql bootstrap
+            elif [[ "$DISTRO" == "CentOS" ]]; then
+                # Enable galera in /etc/my.cnf.d/server.cnf
+                sed -i "/\[galera\]/a\wsrep_on=ON\\
+                query_cache_size=0\\
+                binlog_format=ROW\\
+                default-storage-engine=innodb\\
+                innodb_autoinc_lock_mode=2\\
+                query_cache_type=0\\
+                bind-address=0.0.0.0\\
+                \\
+                # Galera Provider Configuration\\
+                wsrep_provider=$WSREP_PROVIDER\\
+                \\
+                # Galera Cluster Configuration\\
+                wsrep_cluster_name='openbook_cluster'\\
+                wsrep_cluster_address='gcomm://$master_ip'\\
+                \\
+                # Galera Synchronization Congifuration\\
+                wsrep_sst_method=rsync\\
+                \\
+                # Galera Node Configuration\\
+                wsrep_node_address='$my_ip'\\
+                wsrep_node_name='galera1'" $MYSQL_CONF_DIR/server.cnf
+                
+                sed -i 's/^    //g' $MYSQL_CONF_DIR/server.cnf
+                
+                systemctl stop mysql
+                galera_new_cluster
+            else
+                exit 1
+            fi
             
             # Download and install Openbook
             # Check for alternate download URL first
@@ -251,22 +321,58 @@ resources:
             #!/bin/bash -ex
             my_ip=$(curl http://169.254.169.254/2009-04-04/meta-data/local-ipv4)
             echo "$my_ip  $(hostname)" >> /etc/hosts
-            
-            # Check for mariadb availability before adding key and repo
-            MARIADB_AVAILABLE=$(aptitude -F "%p" search mariadb-galera-server-10.0)
-            if [ "" == "$MARIADB_AVAILABLE" ]; then
-                apt-get install software-properties-common
-                apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
-                add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
-                apt-get update
+            if [ -f /etc/lsb-release ]; then
+              DISTRO="Ubuntu"
+            elif [ -f /etc/redhat-release ]; then
+              DISTRO="CentOS"
+            else
+              echo "Unable to determine if Ubuntu or CentOS"
+              exit 1
             fi
             
-            export DEBIAN_FRONTEND=noninteractive
-            
-            # configure/confirm the default root password during installation
-            debconf-set-selections <<< "mariadb-galera-server-10.0 mysql-server/root_password password $admin_password"
-            debconf-set-selections <<< "mariadb-galera-server-10.0 mysql-server/root_password_again password $admin_password"
-            apt-get -y install mariadb-galera-server-10.0 galera unzip ntp
+            case $DISTRO in
+                'Ubuntu')
+                    MYSQL_CONF_DIR='/etc/mysql/conf.d'
+                    WSREP_PROVIDER='/usr/lib/galera/libgalera_smm.so'
+                                
+                    # Check for mariadb availability before adding key and repo
+                    MARIADB_AVAILABLE=$(aptitude -F "%p" search mariadb-galera-server-10.0)
+                    if [ "" == "$MARIADB_AVAILABLE" ]; then
+                        apt-get install software-properties-common
+                        apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
+                        add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
+                        apt-get update
+                    fi
+                    
+                    export DEBIAN_FRONTEND=noninteractive
+                    
+                    # configure/confirm the default root password during installation
+                    debconf-set-selections <<< "mariadb-galera-server-10.0 mysql-server/root_password password $admin_password"
+                    debconf-set-selections <<< "mariadb-galera-server-10.0 mysql-server/root_password_again password $admin_password"
+                    apt-get -y install mariadb-galera-server-10.0 galera unzip ntp
+                    ;;
+                'CentOS')
+                    MYSQL_CONF_DIR='/etc/my.cnf.d'
+                    WSREP_PROVIDER='/usr/lib64/galera/libgalera_smm.so'
+
+                    cat << EOF >> /etc/yum.repos.d/MariaDB.repo
+                    [mariadb]
+                    name = MariaDB
+                    baseurl = http://yum.mariadb.org/10.1/centos7-amd64
+                    gpgkey=https://yum.mariadb.org/RPM-GPG-KEY-MariaDB
+                    gpgcheck=1
+            EOF
+                    sed -i 's/^        //g' /etc/yum.repos.d/MariaDB.repo
+
+                    yum -y install MariaDB-server MariaDB-client wget unzip ntp
+                    systemctl start mariadb
+                    mysql -uroot mysql <<-EOF
+                    update user set password=password('$admin_password') where user='root';
+                    flush privileges;
+            EOF
+
+                    ;;
+            esac
             
             cat << EOF >> /root/.my.cnf
             [mysql]
@@ -290,47 +396,83 @@ resources:
             
             #service mysql stop
             
-            cat << EOF >> /etc/mysql/conf.d/cluster.cnf
-            [mysqld]
-            query_cache_size=0
-            binlog_format=ROW
-            default-storage-engine=innodb
-            innodb_autoinc_lock_mode=2
-            query_cache_type=0
-            bind-address=0.0.0.0
             
-            # Galera Provider Configuration
-            wsrep_provider=/usr/lib/galera/libgalera_smm.so
-            
-            # Galera Cluster Configuration
-            wsrep_cluster_name="openbook_cluster"
-            wsrep_cluster_address="gcomm://$master_ip"
-            
-            # Galera Synchronization Congifuration
-            wsrep_sst_method=rsync
-            
-            # Galera Node Configuration
-            wsrep_node_address="$my_ip"
-            wsrep_node_name="galera2"
+            if [[ "$DISTRO" == "Ubuntu" ]]; then
+                cat << EOF >> $MYSQL_CONF_DIR/cluster.cnf
+                [mysqld]
+                query_cache_size=0
+                binlog_format=ROW
+                default-storage-engine=innodb
+                innodb_autoinc_lock_mode=2
+                query_cache_type=0
+                bind-address=0.0.0.0
+
+                # Galera Provider Configuration
+                wsrep_provider=$WSREP_PROVIDER
+
+                # Galera Cluster Configuration
+                wsrep_cluster_name="openbook_cluster"
+                wsrep_cluster_address="gcomm://$master_ip"
+
+                # Galera Synchronization Congifuration
+                wsrep_sst_method=rsync
+
+                # Galera Node Configuration
+                wsrep_node_address="$my_ip"
+                wsrep_node_name="galera2"
             EOF
-            
+                sed -i 's/^    //g' $MYSQL_CONF_DIR/cluster.cnf
+                
             #sed -i "s/bind-address.*/bind-address = 0.0.0.0/" /etc/mysql/my.cnf
-            
-            cat << EOF > /etc/mysql/debian.cnf
-            [client]
-            host     = localhost
-            user     = debian-sys-maint
-            password = $admin_password
-            socket   = /var/run/mysqld/mysqld.sock
-            [mysql_upgrade]
-            host     = localhost
-            user     = debian-sys-maint
-            password = $admin_password
-            socket   = /var/run/mysqld/mysqld.sock
-            basedir  = /usr
+
+                cat << EOF > /etc/mysql/debian.cnf
+                [client]
+                host     = localhost
+                user     = debian-sys-maint
+                password = $admin_password
+                socket   = /var/run/mysqld/mysqld.sock
+                [mysql_upgrade]
+                host     = localhost
+                user     = debian-sys-maint
+                password = $admin_password
+                socket   = /var/run/mysqld/mysqld.sock
+                basedir  = /usr
             EOF
+                sed -i 's/^    //g' /etc/mysql/debian.cnf
+
+                service mysql restart
+                
+           elif [[ "$DISTRO" == "CentOS" ]]; then
+                # Enable galera in /etc/my.cnf.d/server.cnf
+                sed -i "/\[galera\]/a\wsrep_on=ON\\
+                query_cache_size=0\\
+                binlog_format=ROW\\
+                default-storage-engine=innodb\\
+                innodb_autoinc_lock_mode=2\\
+                query_cache_type=0\\
+                bind-address=0.0.0.0\\
+                \\
+                # Galera Provider Configuration\\
+                wsrep_provider=$WSREP_PROVIDER\\
+                \\
+                # Galera Cluster Configuration\\
+                wsrep_cluster_name='openbook_cluster'\\
+                wsrep_cluster_address='gcomm://$master_ip'\\
+                \\
+                # Galera Synchronization Congifuration\\
+                wsrep_sst_method=rsync\\
+                \\
+                # Galera Node Configuration\\
+                wsrep_node_address='$my_ip'\\
+                wsrep_node_name='galera2'" $MYSQL_CONF_DIR/server.cnf
+
+                sed -i 's/^    //g' $MYSQL_CONF_DIR/server.cnf
+
+                systemctl restart mysql
+            else
+                exit 1
+            fi
             
-            service mysql restart
             
             wc_notify --data-binary '{"status": "SUCCESS"}'
   
@@ -355,22 +497,58 @@ resources:
             #!/bin/bash -ex
             my_ip=$(curl http://169.254.169.254/2009-04-04/meta-data/local-ipv4)
             echo "$my_ip  $(hostname)" >> /etc/hosts
-            
-            # Check for mariadb availability before adding key and repo
-            MARIADB_AVAILABLE=$(aptitude -F "%p" search mariadb-galera-server-10.0)
-            if [ "" == "$MARIADB_AVAILABLE" ]; then
-                apt-get install software-properties-common
-                apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
-                add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
-                apt-get update
+            if [ -f /etc/lsb-release ]; then
+              DISTRO="Ubuntu"
+            elif [ -f /etc/redhat-release ]; then
+              DISTRO="CentOS"
+            else
+              echo "Unable to determine if Ubuntu or CentOS"
+              exit 1
             fi
             
-            export DEBIAN_FRONTEND=noninteractive
-            
-            # configure/confirm the default root password during installation
-            debconf-set-selections <<< "mariadb-galera-server-10.0 mysql-server/root_password password $admin_password"
-            debconf-set-selections <<< "mariadb-galera-server-10.0 mysql-server/root_password_again password $admin_password"
-            apt-get -y install mariadb-galera-server-10.0 galera unzip ntp
+            case $DISTRO in
+                'Ubuntu')
+                    MYSQL_CONF_DIR='/etc/mysql/conf.d'
+                    WSREP_PROVIDER='/usr/lib/galera/libgalera_smm.so'
+                                
+                    # Check for mariadb availability before adding key and repo
+                    MARIADB_AVAILABLE=$(aptitude -F "%p" search mariadb-galera-server-10.0)
+                    if [ "" == "$MARIADB_AVAILABLE" ]; then
+                        apt-get install software-properties-common
+                        apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
+                        add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
+                        apt-get update
+                    fi
+                    
+                    export DEBIAN_FRONTEND=noninteractive
+                    
+                    # configure/confirm the default root password during installation
+                    debconf-set-selections <<< "mariadb-galera-server-10.0 mysql-server/root_password password $admin_password"
+                    debconf-set-selections <<< "mariadb-galera-server-10.0 mysql-server/root_password_again password $admin_password"
+                    apt-get -y install mariadb-galera-server-10.0 galera unzip ntp
+                    ;;
+                'CentOS')
+                    MYSQL_CONF_DIR='/etc/my.cnf.d'
+                    WSREP_PROVIDER='/usr/lib64/galera/libgalera_smm.so'
+
+                    cat << EOF >> /etc/yum.repos.d/MariaDB.repo
+                    [mariadb]
+                    name = MariaDB
+                    baseurl = http://yum.mariadb.org/10.1/centos7-amd64
+                    gpgkey=https://yum.mariadb.org/RPM-GPG-KEY-MariaDB
+                    gpgcheck=1
+            EOF
+                    sed -i 's/^        //g' /etc/yum.repos.d/MariaDB.repo
+
+                    yum -y install MariaDB-server MariaDB-client wget unzip ntp
+                    systemctl start mariadb
+                    mysql -uroot mysql <<-EOF
+                    update user set password=password('$admin_password') where user='root';
+                    flush privileges;
+            EOF
+
+                    ;;
+            esac
             
             cat << EOF >> /root/.my.cnf
             [mysql]
@@ -394,50 +572,85 @@ resources:
             
             #service mysql stop
             
-            cat << EOF >> /etc/mysql/conf.d/cluster.cnf
-            [mysqld]
-            query_cache_size=0
-            binlog_format=ROW
-            default-storage-engine=innodb
-            innodb_autoinc_lock_mode=2
-            query_cache_type=0
-            bind-address=0.0.0.0
             
-            # Galera Provider Configuration
-            wsrep_provider=/usr/lib/galera/libgalera_smm.so
-            
-            # Galera Cluster Configuration
-            wsrep_cluster_name="openbook_cluster"
-            wsrep_cluster_address="gcomm://$master_ip"
-            
-            # Galera Synchronization Congifuration
-            wsrep_sst_method=rsync
-            
-            # Galera Node Configuration
-            wsrep_node_address="$my_ip"
-            wsrep_node_name="galera3"
+            if [[ "$DISTRO" == "Ubuntu" ]]; then
+                cat << EOF >> $MYSQL_CONF_DIR/cluster.cnf
+                [mysqld]
+                query_cache_size=0
+                binlog_format=ROW
+                default-storage-engine=innodb
+                innodb_autoinc_lock_mode=2
+                query_cache_type=0
+                bind-address=0.0.0.0
+
+                # Galera Provider Configuration
+                wsrep_provider=$WSREP_PROVIDER
+
+                # Galera Cluster Configuration
+                wsrep_cluster_name="openbook_cluster"
+                wsrep_cluster_address="gcomm://$master_ip"
+
+                # Galera Synchronization Congifuration
+                wsrep_sst_method=rsync
+
+                # Galera Node Configuration
+                wsrep_node_address="$my_ip"
+                wsrep_node_name="galera3"
             EOF
-            
+                sed -i 's/^    //g' $MYSQL_CONF_DIR/cluster.cnf
+                
             #sed -i "s/bind-address.*/bind-address = 0.0.0.0/" /etc/mysql/my.cnf
-            
-            cat << EOF > /etc/mysql/debian.cnf
-            [client]
-            host     = localhost
-            user     = debian-sys-maint
-            password = $admin_password
-            socket   = /var/run/mysqld/mysqld.sock
-            [mysql_upgrade]
-            host     = localhost
-            user     = debian-sys-maint
-            password = $admin_password
-            socket   = /var/run/mysqld/mysqld.sock
-            basedir  = /usr
+
+                cat << EOF > /etc/mysql/debian.cnf
+                [client]
+                host     = localhost
+                user     = debian-sys-maint
+                password = $admin_password
+                socket   = /var/run/mysqld/mysqld.sock
+                [mysql_upgrade]
+                host     = localhost
+                user     = debian-sys-maint
+                password = $admin_password
+                socket   = /var/run/mysqld/mysqld.sock
+                basedir  = /usr
             EOF
-            
-            #################
-            #################
-            # MIGHT NEED TO THROW IN A mysql query check to see if the first node is full up
-            service mysql restart
+                sed -i 's/^    //g' /etc/mysql/debian.cnf
+
+                #################
+                #################
+                # MIGHT NEED TO THROW IN A mysql query check to see if the first node is full up
+                service mysql restart
+                
+           elif [[ "$DISTRO" == "CentOS" ]]; then
+                # Enable galera in /etc/my.cnf.d/server.cnf
+                sed -i "/\[galera\]/a\wsrep_on=ON\\
+                query_cache_size=0\\
+                binlog_format=ROW\\
+                default-storage-engine=innodb\\
+                innodb_autoinc_lock_mode=2\\
+                query_cache_type=0\\
+                bind-address=0.0.0.0\\
+                \\
+                # Galera Provider Configuration\\
+                wsrep_provider=$WSREP_PROVIDER\\
+                \\
+                # Galera Cluster Configuration\\
+                wsrep_cluster_name='openbook_cluster'\\
+                wsrep_cluster_address='gcomm://$master_ip'\\
+                \\
+                # Galera Synchronization Congifuration\\
+                wsrep_sst_method=rsync\\
+                \\
+                # Galera Node Configuration\\
+                wsrep_node_address='$my_ip'\\
+                wsrep_node_name='galera3'" $MYSQL_CONF_DIR/server.cnf
+
+                sed -i 's/^    //g' $MYSQL_CONF_DIR/server.cnf
+
+                systemctl restart mysql
+            else
+                exit 1
+            fi
             
             wc_notify --data-binary '{"status": "SUCCESS"}'
   

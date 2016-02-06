@@ -18,7 +18,6 @@ parameters:
   image:
     type: string
     description: Image ID or image name to use for the server
-    default: ubuntu-14.04
     constraints:
       - custom_constraint: glance.image
   flavor:
@@ -117,35 +116,69 @@ resources:
             
             echo "$(curl http://169.254.169.254/2009-04-04/meta-data/local-ipv4)  $(hostname)" >> /etc/hosts
             
-            # Check for mariadb availability before adding key and repo
-            MARIADB_AVAILABLE=$(aptitude -F "%p" search mariadb-client-core-10.0)
-            if [ "" == "$MARIADB_AVAILABLE" ]; then
-                apt-get install software-properties-common
-                apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
-                add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
+            if [ -f /etc/lsb-release ]; then
+              DISTRO="Ubuntu"
+            elif [ -f /etc/redhat-release ]; then
+              DISTRO="CentOS"
+            else
+              echo "Unable to determine if Ubuntu or CentOS"
+              exit 1
             fi
             
-            # Check for java-8 availability before adding repo
-            JAVA_AVAILABLE=$(aptitude -F "%p" search openjdk-8-jdk)
-            if [ "" == "$JAVA_AVAILABLE" ]; then
-                apt-get install software-properties-common
-                add-apt-repository -y ppa:openjdk-r/ppa
-            fi
-
-            apt-get update
-
-            # Install OpenJDK 8
-            apt-get install -y openjdk-8-jdk
-            ln -s /usr/lib/jvm/java-8-openjdk-amd64 /usr/lib/jvm/default-java
-            update-ca-certificates -f
+            # Set the max heap size
+            JVM_HEAP_PERCENT=50
+            TOTAL_MEM=$(free -m | awk '/Mem:/ {print $2}')
+            let JVM_HEAP=$TOTAL_MEM*$JVM_HEAP_PERCENT/100
             
-            ### TOMCAT ###
-            apt-get install -y tomcat7 mariadb-client-core-10.0 ntp unzip
-            sed -i 's/Xmx.*\ /Xmx2048m /g' /etc/default/tomcat7
-            sed -i '/^JAVA_OPTS/ s/"$/ -Djsse.enableSNIExtension=false -Djava.security.egd=file:\/dev\/urandom"/g' /etc/default/tomcat7
-            
-            rm -rf /var/lib/tomcat7/webapps/ROOT
-            service tomcat7 stop
+            case $DISTRO in
+                'Ubuntu')
+                    TOMCAT_DIR='/var/lib/tomcat7'
+                    # Check for mariadb availability before adding key and repo
+                    MARIADB_AVAILABLE=$(aptitude -F "%p" search mariadb-client-core-10.0)
+                    if [ "" == "$MARIADB_AVAILABLE" ]; then
+                        apt-get install software-properties-common
+                        apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
+                        add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
+                    fi
+                    
+                    # Check for java-8 availability before adding repo
+                    JAVA_AVAILABLE=$(aptitude -F "%p" search openjdk-8-jdk)
+                    if [ "" == "$JAVA_AVAILABLE" ]; then
+                        apt-get install software-properties-common
+                        add-apt-repository -y ppa:openjdk-r/ppa
+                    fi
+        
+                    apt-get update
+        
+                    # Install OpenJDK 8
+                    apt-get install -y openjdk-8-jdk
+                    ln -s /usr/lib/jvm/java-8-openjdk-amd64 /usr/lib/jvm/default-java
+                    update-ca-certificates -f
+                    
+                    ### TOMCAT ###
+                    apt-get install -y tomcat7 mariadb-client-core-10.0 ntp unzip
+                    sed -i 's/Xmx.*\ /Xmx2048m /g' /etc/default/tomcat7
+                    sed -i '/^JAVA_OPTS/ s/"$/ -Djsse.enableSNIExtension=false -Djava.security.egd=file:\/dev\/urandom"/g' /etc/default/tomcat7
+                    rm -rf ${TOMCAT_DIR}/webapps/ROOT
+                    service tomcat7 stop
+                    ;;
+                'CentOS')
+                    TOMCAT_DIR='/var/lib/tomcat'
+                    cat << EOF >> /etc/yum.repos.d/MariaDB.repo
+                    [mariadb]
+                    name = MariaDB
+                    baseurl = http://yum.mariadb.org/10.1/centos7-amd64
+                    gpgkey=https://yum.mariadb.org/RPM-GPG-KEY-MariaDB
+                    gpgcheck=1
+            EOF
+                    sed -i 's/^        //g' /etc/yum.repos.d/MariaDB.repo
+
+                    yum -y install java-1.8.0-openjdk tomcat MariaDB-client wget unzip ntp
+                    
+                    echo "JAVA_OPTS='-Djava.awt.headless=true -Xmx${JVM_HEAP}m -Djava.security.egd=file:/dev/urandom'" >> /etc/sysconfig/tomcat
+                   
+                   ;; 
+            esac
             
             # Download and install Openbook
             # Check for alternate download URL first
@@ -165,15 +198,22 @@ resources:
             fi
             
             unzip -q /tmp/Openbook*.zip -d /tmp
-            unzip -q /tmp/Openbook-*/Openbook.war -d /var/lib/tomcat7/webapps/Openbook
+            unzip -q /tmp/Openbook-*/Openbook.war -d ${TOMCAT_DIR}/webapps/Openbook
             
             # Set the public url for Openbook
             #sed -ri 's/(ROOT_PROVIDER_PUBLIC_URL = https:\/\/).*/\1$floating_ip/' /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/openbook.properties
-            sed -ri 's/(DB_\w+_HOST = ).*/\1$galera_ip/' /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/openbook.properties
+            sed -ri 's/(DB_\w+_HOST = ).*/\1$galera_ip/' ${TOMCAT_DIR}/webapps/Openbook/WEB-INF/classes/openbook.properties
             
-            chown -R tomcat7.tomcat7 /var/lib/tomcat7/webapps/Openbook
-            
-            service tomcat7 start
+            if [[ "$DISTRO" == "Ubuntu" ]]; then
+                chown -R tomcat7.tomcat7 ${TOMCAT_DIR}/webapps/Openbook
+                service tomcat7 start
+            elif [[ "$DISTRO" == "CentOS" ]]; then
+                chown -R tomcat.tomcat ${TOMCAT_DIR}/webapps/Openbook
+                systemctl start tomcat
+                systemctl enable tomcat
+            else
+                exit 1
+            fi
             
             # Sleep a little bit to allow tomcat to finish initial liquibase run for Openbook
             sleep 60

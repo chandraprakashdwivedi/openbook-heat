@@ -34,6 +34,10 @@ parameters:
   port_id:
     type: string
     description: ID of an existing port to associate with this server
+  floating_ip:
+    type: string
+    label: Floating IP
+    description: Public IP (floating ip) that will be used to access Openbook.
   
 resources:
   wait_condition:
@@ -76,19 +80,38 @@ resources:
         str_replace:
           params:
             wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
+            $floating_ip: { get_param: floating_ip }
           template: |
             #!/bin/bash -ex
             echo "$(curl http://169.254.169.254/2009-04-04/meta-data/local-ipv4)  $(hostname)" >> /etc/hosts
             
-            # Check which version of haproxy is available, add repo if it's not 1.5+
-            if [[ ! "$(aptitude versions ^haproxy$ | awk '{if (NR!=1) {print $2}}')" =~ ^1.5 ]]; then
-                add-apt-repository -y ppa:vbernat/haproxy-1.5
+            if [ -f /etc/lsb-release ]; then
+              DISTRO="Ubuntu"
+            elif [ -f /etc/redhat-release ]; then
+              DISTRO="CentOS"
+            else
+              echo "Unable to determine if Ubuntu or CentOS"
+              exit 1
             fi
-            apt-get update
-            aptitude install -y haproxy
+            case $DISTRO in
+                'Ubuntu')
+                    
+                    # Check which version of haproxy is available, add repo if it's not 1.5+
+                    if [[ ! "$(aptitude versions ^haproxy$ | awk '{if (NR!=1) {print $2}}')" =~ ^1.5 ]]; then
+                        add-apt-repository -y ppa:vbernat/haproxy-1.5
+                    fi
+                    apt-get update
+                    aptitude install -y haproxy
+                    ;;
+                'CentOS')
+                    ln -s /etc/ssl/certs /etc/ssl/private
+                    yum -y install haproxy
+                    ;;
+            esac
             
             # Generate self-signed certificate
             openssl req -x509 -nodes -subj "/C=US/ST=Texas/L=Austin/O=Talligent/CN=talligent.net/emailAddress=support@talligent.com" -days 365 -newkey rsa:2048 -keyout openbook.key -out openbook.crt
+            openssl req -x509 -nodes -subj "/C=US/ST=Texas/L=Austin/O=Talligent/CN=talligent.net/emailAddress=support@talligent.com/subjectAltName=IP:$floating_ip" -days 365 -newkey rsa:2048 -keyout openbook.key -out openbook.crt
             # openssl x509 -in openbook.crt -text -noout
             cat openbook.crt openbook.key > openbook.pem
             mv openbook.pem /etc/ssl/private/
@@ -167,7 +190,16 @@ resources:
             
             # Restart haproxy
             sleep 60
-            service haproxy restart
+            
+            if [[ "$DISTRO" == "Ubuntu" ]]; then
+                service haproxy restart
+            elif [[ "$DISTRO" == "CentOS" ]]; then
+                chcon --reference /etc/ssl/private/ca-bundle.crt /etc/ssl/private/openbook.pem
+                systemctl start haproxy
+                systemctl enable haproxy
+            else
+                exit 1;
+            fi
             
             wc_notify --data-binary '{"status": "SUCCESS"}'
 
