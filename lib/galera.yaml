@@ -621,7 +621,7 @@ resources:
                 # MIGHT NEED TO THROW IN A mysql query check to see if the first node is full up
                 service mysql restart
                 
-           elif [[ "$DISTRO" == "CentOS" ]]; then
+            elif [[ "$DISTRO" == "CentOS" ]]; then
                 # Enable galera in /etc/my.cnf.d/server.cnf
                 sed -i "/\[galera\]/a\wsrep_on=ON\\
                 query_cache_size=0\\
