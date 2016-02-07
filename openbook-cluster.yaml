@@ -129,6 +129,7 @@ resources:
       image: { get_param: image }
       port_id: { get_resource: public_port }
       servers: { get_attr: [openbook_cluster, ip] }
+      floating_ip: { get_attr: [ floating_ip, floating_ip_address ] }
 
 outputs:
   Openbook_admin:
