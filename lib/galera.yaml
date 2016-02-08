@@ -43,6 +43,7 @@ parameters:
     label: Sharefile Password
     description: Password for accessing Talligent Sharefile
     default: none
+    hidden: true
   alt_download_url:
     type: string
     label: Alternate Openbook download URL
