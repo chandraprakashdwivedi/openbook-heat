@@ -150,7 +150,7 @@ resources:
             case $DISTRO in
                 'Ubuntu')
                     
-                    MYSQL_CONF_FILE='/etc/my.cnf'
+                    MYSQL_CONF_FILE='/etc/mysql/my.cnf'
                     TOMCAT_DIR='/var/lib/tomcat7'
                     TOMCAT_CONFIG='/etc/tomcat7/server.xml'
                     
@@ -246,7 +246,7 @@ resources:
             keytool -genkey -keyalg RSA -alias openbook \
             -dname "CN=$(hostname), O=Talligent, L=Austin, S=Texas, C=US" \
             -ext san=ip:${floating_ip},ip:127.0.0.1 \
-            -keystore ${JAVA_HOME}/lib/security/cacerts
+            -keystore ${JAVA_HOME}/lib/security/cacerts \
             -storepass changeit \
             -validity 360 \
             -keysize 2048 \
