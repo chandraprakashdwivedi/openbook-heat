@@ -187,7 +187,7 @@ resources:
                     
                     ### TOMCAT ###
                     apt-get install -y tomcat7 mariadb-client-core-10.0 ntp unzip
-                    sed -i 's/Xmx.*\ /Xmx${JVM_HEAP}m /g' /etc/default/tomcat7
+                    sed -i "s/Xmx.*\ /Xmx${JVM_HEAP}m /g" /etc/default/tomcat7
                     sed -i '/^JAVA_OPTS/ s/"$/ -Djsse.enableSNIExtension=false -Djava.security.egd=file:\/dev\/urandom"/g' /etc/default/tomcat7
                     rm -rf ${TOMCAT_DIR}/webapps/ROOT
                     service tomcat7 stop
@@ -260,7 +260,7 @@ resources:
                     s[<!--\n\s+(<Connector port="8443" .*\n.*\n.*\n)\s+-->][$1];
                 }' $TOMCAT_CONFIG
             
-            sed -i "/$SSL_MATCH/a\               keystoreFile='${JAVA_HOME}/lib/security/cacerts'\\
+            sed -i "/$SSL_MATCH/a\               keystoreFile='${JAVA_HOME}/lib/security/cacerts'\n\
                            keystorePass='changeit'/" $TOMCAT_CONFIG
             
             
