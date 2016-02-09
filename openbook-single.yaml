@@ -261,7 +261,7 @@ resources:
                 }' $TOMCAT_CONFIG
             
             sed -i "/$SSL_MATCH/a\               keystoreFile='${JAVA_HOME}/lib/security/cacerts'\n\
-                           keystorePass='changeit'/" $TOMCAT_CONFIG
+                           keystorePass='changeit'" $TOMCAT_CONFIG
             
             
             # Download and install Openbook
