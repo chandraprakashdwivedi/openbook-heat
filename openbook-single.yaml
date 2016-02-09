@@ -132,7 +132,6 @@ resources:
             #!/bin/bash -ex
             
             echo "$floating_ip  $(hostname)" >> /etc/hosts
-            echo "$my_ip  $(hostname)" >> /etc/hosts
             if [ -f /etc/lsb-release ]; then
               DISTRO="Ubuntu"
             elif [ -f /etc/redhat-release ]; then
@@ -245,7 +244,7 @@ resources:
             JAVA_HOME=$(readlink -f /usr/bin/java | sed 's|bin/java||')
             keytool -genkey -keyalg RSA -alias openbook \
             -dname "CN=$(hostname), O=Talligent, L=Austin, S=Texas, C=US" \
-            -ext san=ip:${floating_ip},ip:127.0.0.1 \
+            -ext san=ip:$floating_ip,ip:127.0.0.1 \
             -keystore ${JAVA_HOME}/lib/security/cacerts \
             -storepass changeit \
             -validity 360 \
