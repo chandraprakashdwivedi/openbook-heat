@@ -52,11 +52,18 @@ parameters:
     type: string
     label: Sharefile Username
     description: Username for accessing Talligent Sharefile
+    default: none
   sharefile_pass:
     type: string
     label: Sharefile Password
     description: Password for accessing Talligent Sharefile
+    default: none
     hidden: true
+  alt_download_url:
+    type: string
+    label: Alternate Openbook download URL
+    description: Alternative download location of Openbook zip if Sharefile credentials are not provided
+    default: none
 
 resources:
   wait_condition:
@@ -125,28 +132,95 @@ resources:
             #!/bin/bash -ex
             
             echo "$floating_ip  $(hostname)" >> /etc/hosts
+            echo "$my_ip  $(hostname)" >> /etc/hosts
+            if [ -f /etc/lsb-release ]; then
+              DISTRO="Ubuntu"
+            elif [ -f /etc/redhat-release ]; then
+              DISTRO="CentOS"
+            else
+              echo "Unable to determine if Ubuntu or CentOS"
+              exit 1
+            fi
             
-            # Add MariaDB and OpenJDK 8 repos
-            apt-get install software-properties-common
-            apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
-            add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
-            add-apt-repository -y ppa:openjdk-r/ppa
-            
-            apt-get update
-            
-            # Install OpenJDK 8
-            #apt-get install -y openjdk-8-jre-headless
-            apt-get install -y openjdk-8-jdk
-            ln -s /usr/lib/jvm/java-8-openjdk-amd64 /usr/lib/jvm/default-java
-            update-ca-certificates -f
-            
-            # MariaDB
-            export DEBIAN_FRONTEND=noninteractive
-            
-            # configure/confirm the default root password during installation
-            debconf-set-selections <<< 'mariadb-server-10.0 mysql-server/root_password password $admin_password'
-            debconf-set-selections <<< 'mariadb-server-10.0 mysql-server/root_password_again password $admin_password'
-            apt-get -y install mariadb-server
+            # Set the max heap size
+            JVM_HEAP_PERCENT=50
+            TOTAL_MEM=$(free -m | awk '/Mem:/ {print $2}')
+            let JVM_HEAP=$TOTAL_MEM*$JVM_HEAP_PERCENT/100
+
+            case $DISTRO in
+                'Ubuntu')
+                    
+                    MYSQL_CONF_FILE='/etc/my.cnf'
+                    TOMCAT_DIR='/var/lib/tomcat7'
+                    TOMCAT_CONFIG='/etc/tomcat7/server.xml'
+                    
+                    # Add MariaDB and OpenJDK 8 repos
+                    # Check for mariadb availability before adding key and repo
+                    MARIADB_AVAILABLE=$(aptitude -F "%p" search mariadb-client-core-10.0)
+                    if [ "" == "$MARIADB_AVAILABLE" ]; then
+                        apt-get install software-properties-common
+                        apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
+                        add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
+                    fi
+
+                    # Check for java-8 availability before adding repo
+                    JAVA_AVAILABLE=$(aptitude -F "%p" search openjdk-8-jdk)
+                    if [ "" == "$JAVA_AVAILABLE" ]; then
+                        apt-get install software-properties-common
+                        add-apt-repository -y ppa:openjdk-r/ppa
+                    fi
+
+                    apt-get update
+
+                    # Install OpenJDK 8
+                    apt-get install -y openjdk-8-jdk
+                    ln -s /usr/lib/jvm/java-8-openjdk-amd64 /usr/lib/jvm/default-java
+                    update-ca-certificates -f
+                    
+                    # MariaDB
+                    export DEBIAN_FRONTEND=noninteractive
+                    
+                    # configure/confirm the default root password during installation
+                    debconf-set-selections <<< 'mariadb-server-10.0 mysql-server/root_password password $admin_password'
+                    debconf-set-selections <<< 'mariadb-server-10.0 mysql-server/root_password_again password $admin_password'
+                    apt-get -y install mariadb-server
+                    
+                    ### TOMCAT ###
+                    apt-get install -y tomcat7 mariadb-client-core-10.0 ntp unzip
+                    sed -i 's/Xmx.*\ /Xmx${JVM_HEAP}m /g' /etc/default/tomcat7
+                    sed -i '/^JAVA_OPTS/ s/"$/ -Djsse.enableSNIExtension=false -Djava.security.egd=file:\/dev\/urandom"/g' /etc/default/tomcat7
+                    rm -rf ${TOMCAT_DIR}/webapps/ROOT
+                    service tomcat7 stop
+
+                    ;;
+                
+                'CentOS')
+                    
+                    MYSQL_CONF_FILE='/etc/my.cnf.d/server.cnf'
+                    TOMCAT_DIR='/var/lib/tomcat'
+                    TOMCAT_CONFIG='/etc/tomcat/server.xml'
+                    
+                    # Add MariaDB repo
+                    cat << EOF >> /etc/yum.repos.d/MariaDB.repo
+                    [mariadb]
+                    name = MariaDB
+                    baseurl = http://yum.mariadb.org/10.1/centos7-amd64
+                    gpgkey=https://yum.mariadb.org/RPM-GPG-KEY-MariaDB
+                    gpgcheck=1
+            EOF
+                    sed -i 's/^        //g' /etc/yum.repos.d/MariaDB.repo
+                    
+                    # Install Java 8, MariaDB, and Tomcat
+                    yum -y install java-1.8.0-openjdk tomcat MariaDB-server MariaDB-client wget unzip ntp
+                    systemctl start mariadb
+                    mysql -uroot mysql <<-EOF
+                    update user set password=password('$admin_password') where user='root';
+                    flush privileges;
+            EOF
+                    
+                    echo "JAVA_OPTS='-Djava.awt.headless=true -Xmx${JVM_HEAP}m -Djava.security.egd=file:/dev/urandom'" >> /etc/sysconfig/tomcat
+                    ;;
+            esac
             
             cat << EOF >> /root/.my.cnf
             [mysql]
@@ -164,62 +238,64 @@ resources:
             EOF
             
             # Set binglog format to MIXED (defaults to STATEMENT)
-            sed -i "/\[mysqld\]/a\binlog_format = MIXED" /etc/mysql/my.cnf
-            service mysql restart
-            
-            ### TOMCAT ###
-            apt-get install -y tomcat7 mariadb-client-core-10.0 ntp unzip
-            # Set the max heap size
-            JVM_HEAP_PERCENT=50
-            TOTAL_MEM=$(free -m | awk '/Mem:/ {print $2}')
-            let JVM_HEAP=$TOTAL_MEM*$JVM_HEAP_PERCENT/100
-            sed -i "s/Xmx.*\ /Xmx${JVM_HEAP}m /g" /etc/default/tomcat7
-            sed -i '/^JAVA_OPTS/ s/"$/ -Djsse.enableSNIExtension=false -Djava.security.egd=file:\/dev\/urandom"/g' /etc/default/tomcat7
+            sed -i "/\[mysqld\]/a\binlog_format = MIXED" $MYSQL_CONF_FILE
+            /etc/init.d/mysql restart
             
             # Generate key
-            keytool -genkey -keyalg RSA -alias tomcat \
+            JAVA_HOME=$(readlink -f /usr/bin/java | sed 's|bin/java||')
+            keytool -genkey -keyalg RSA -alias openbook \
             -dname "CN=$(hostname), O=Talligent, L=Austin, S=Texas, C=US" \
-            -keystore /etc/ssl/certs/java/cacerts \
+            -ext san=ip:${floating_ip},ip:127.0.0.1 \
+            -keystore ${JAVA_HOME}/lib/security/cacerts
             -storepass changeit \
             -validity 360 \
             -keysize 2048 \
             -keypass changeit
             
             
-            
             # Enable 8443 for tomcat
-            cat << EOF >> /tmp/tomcat-ssl.patch
-            87d86
-            <     <!--
-            89a89,90
-            >                keystoreFile="/etc/ssl/certs/java/cacerts"
-            >                keystorePass="changeit"
-            91d91
-            <     -->
-            EOF
+            SSL_MATCH='<Connector port="8443" .*'
+            perl -i -pe '
+                if (/<!--/) { $_ .= <> while !/-->/;
+                    s[<!--\n\s+(<Connector port="8443" .*\n.*\n.*\n)\s+-->][$1];
+                }' $TOMCAT_CONFIG
             
-            patch /etc/tomcat7/server.xml /tmp/tomcat-ssl.patch
+            sed -i "/$SSL_MATCH/a\               keystoreFile='${JAVA_HOME}/lib/security/cacerts'\\
+                           keystorePass='changeit'/" $TOMCAT_CONFIG
             
-            rm -rf /var/lib/tomcat7/webapps/ROOT
-            service tomcat7 stop
             
             # Download and install Openbook
-            export TOKEN=$(curl -s -X POST "https://talligent.sharefile.com/oauth/token" \
-                         -H "Content-Type: application/x-www-form-urlencoded" \
-                         -d "grant_type=password&client_id=eC8y8eeoeunxzOizZq2oeknIVfA9Jyjg&client_secret=PehmEqzEgKuGm2XOZWXIOUY3GyrKcfSmNtwPptPwt0tWxihs&username=$sharefile_user&password=$sharefile_pass" | python -c 'import sys, json; print json.load(sys.stdin)["access_token"]')
-            #export ITEM=$(curl -s -k 'https://talligent.sf-api.com/sf/v3/Items/Search?query=.zip' -H "Authorization: Bearer $TOKEN" | python -c 'import sys, json; print json.load(sys.stdin)["Results"][0]["ItemID"]')
-            export ITEM=$(curl -s -k 'https://talligent.sharefile.com/sf/v3/Items/AdvancedSearch' -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" --data-binary '{"Query":{"SearchQuery":"zip","ItemTypes":null,"CreateStartDate":null,"CreateEndDate":null,"ItemNameOnly":true,"ParentID":[],"CreatorID":[]}}' | python -c 'import sys, json; print json.load(sys.stdin)["Results"][0]["ItemID"]')
-            curl -s -k -L -o "/tmp/Openbook.zip" "https://talligent.sf-api.com/sf/v3/Items($ITEM)/Download" -H "Authorization: Bearer $TOKEN"
-            unzip -q /tmp/Openbook.zip -d /tmp
-            unzip -q /tmp/Openbook-*/Openbook.war -d /var/lib/tomcat7/webapps/Openbook
+            # Check for alternate download URL first
+            if [ "none" != "$alt_download_url" ]; then
+                if [[ "$alt_download_url" =~ "Openbook" ]]; then
+                    wget -q "$alt_download_url" -P "/tmp/"
+                else
+                    wget -q -r "$alt_download_url" -P "/tmp/"
+                    mv /tmp/$(echo $alt_download_url | awk -F\/ '{print $3}')/Openbook*.zip /tmp/
+                fi
+            else
+                export TOKEN=$(curl -s -X POST "https://talligent.sharefile.com/oauth/token" \
+                             -H "Content-Type: application/x-www-form-urlencoded" \
+                             -d "grant_type=password&client_id=eC8y8eeoeunxzOizZq2oeknIVfA9Jyjg&client_secret=PehmEqzEgKuGm2XOZWXIOUY3GyrKcfSmNtwPptPwt0tWxihs&username=$sharefile_user&password=$sharefile_pass" | python -c 'import sys, json; print json.load(sys.stdin)["access_token"]')
+                export ITEM=$(curl -s -k 'https://talligent.sf-api.com/sf/v3/Items/Search?query=.zip' -H "Authorization: Bearer $TOKEN" | python -c 'import sys, json; print json.load(sys.stdin)["Results"][0]["ItemID"]')
+                curl -s -k -L -o "/tmp/Openbook.zip" "https://talligent.sf-api.com/sf/v3/Items($ITEM)/Download" -H "Authorization: Bearer $TOKEN"
+            fi
+
+            unzip -q /tmp/Openbook*.zip -d /tmp
+            unzip -q /tmp/Openbook-*/Openbook.war -d ${TOMCAT_DIR}/webapps/Openbook
             
-            mysql -uroot -p$admin_password < /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/db/MySQL/create_openbook_schemas.sql
+            mysql -uroot -p$admin_password < ${TOMCAT_DIR}/webapps/Openbook/WEB-INF/classes/db/MySQL/create_openbook_schemas.sql
             
-            # Set the public url for Openbook
-            #sed -ri 's/(ROOT_PROVIDER_PUBLIC_URL = https:\/\/).*/\1$floating_ip:8443/' /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/openbook.properties
-            chown -R tomcat7.tomcat7 /var/lib/tomcat7/webapps/Openbook
-            
-            service tomcat7 start
+            if [[ "$DISTRO" == "Ubuntu" ]]; then
+                chown -R tomcat7.tomcat7 ${TOMCAT_DIR}/webapps/Openbook
+                service tomcat7 start
+            elif [[ "$DISTRO" == "CentOS" ]]; then
+                chown -R tomcat.tomcat ${TOMCAT_DIR}/webapps/Openbook
+                systemctl start tomcat
+                systemctl enable tomcat
+            else
+                exit 1
+            fi
             
             # Sleep a little bit to allow tomcat to finish initial liquibase run for Openbook
             sleep 60
