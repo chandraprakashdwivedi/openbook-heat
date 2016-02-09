@@ -11,7 +11,7 @@ description: >
 
 parameter_groups:
 - parameters:
-  - keyname
+  - key_name
   - flavor
   - image
   - private_net
@@ -20,7 +20,7 @@ parameter_groups:
   - sharefile_pass
 
 parameters:
-  keyname:
+  key_name:
     type: string
     description: Name of an existing key pair to use for the server
     constraints:
@@ -114,7 +114,7 @@ resources:
     type: OS::Nova::Server
     properties:
       name: openbook-01
-      key_name: { get_param: keyname }
+      key_name: { get_param: key_name }
       image: { get_param: image }
       flavor: { get_param: flavor }
       networks:
