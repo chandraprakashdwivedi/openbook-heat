@@ -128,6 +128,7 @@ resources:
             $floating_ip: { get_attr: [ floating_ip, floating_ip_address ] }
             $sharefile_user: { get_param: sharefile_user }
             $sharefile_pass: { get_param: sharefile_pass }
+            alt_download_url: { get_param: alt_download_url }
           template: |
             #!/bin/bash -ex
             
