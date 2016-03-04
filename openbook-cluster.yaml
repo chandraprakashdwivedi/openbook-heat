@@ -99,6 +99,7 @@ resources:
     properties:
       key_name: { get_param: key_name }
       image: { get_param: image }
+      flavor: { get_param: flavor }
       #flavor:
       private_net: { get_param: private_net }
       sharefile_user: { get_param: sharefile_user }
@@ -114,7 +115,7 @@ resources:
         properties:
           key_name: { get_param: key_name }
           image: { get_param: image }
-          #flavor: { get_param: flavor }
+          flavor: { get_param: flavor }
           private_net: { get_param: private_net }
           floating_ip: { get_attr: [ floating_ip, floating_ip_address ] }
           galera_ip: { get_attr: [ galera_cluster, ip ] }
@@ -128,6 +129,7 @@ resources:
     properties:
       key_name: { get_param: key_name }
       image: { get_param: image }
+      flavor: { get_param: flavor }
       port_id: { get_resource: public_port }
       servers: { get_attr: [openbook_cluster, ip] }
       floating_ip: { get_attr: [ floating_ip, floating_ip_address ] }
