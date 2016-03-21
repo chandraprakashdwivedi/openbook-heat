@@ -31,6 +31,14 @@ parameters:
     type: comma_delimited_list
     label: Servers
     description: Comma separated list of servers in the cluster.
+  galera_primary:
+    type: string
+    label: Galera
+    description: Primary server in the galera cluster
+  galera:
+    type: comma_delimited_list
+    label: Galera
+    description: Comma separated list of servers in the galera cluster
   port_id:
     type: string
     description: ID of an existing port to associate with this server
@@ -45,7 +53,7 @@ resources:
     properties:
       handle: { get_resource: wait_handle }
       count: 1
-      timeout: 1800
+      timeout: 7200
 
   wait_handle:
     type: OS::Heat::WaitConditionHandle
@@ -75,6 +83,8 @@ resources:
         - port: { get_param: port_id }
       metadata:
         servers: { get_param: servers }
+        galera_primary: { get_param: galera_primary }
+        galera: { get_param: galera }
       user_data_format: RAW
       user_data:
         str_replace:
@@ -110,15 +120,49 @@ resources:
             esac
             
             # Generate self-signed certificate
-            openssl req -x509 -nodes -subj "/C=US/ST=Texas/L=Austin/O=Talligent/CN=talligent.net/emailAddress=support@talligent.com" -days 365 -newkey rsa:2048 -keyout openbook.key -out openbook.crt
+            #openssl req -x509 -nodes -subj "/C=US/ST=Texas/L=Austin/O=Talligent/CN=talligent.net/emailAddress=support@talligent.com" -days 365 -newkey rsa:2048 -keyout openbook.key -out openbook.crt
             openssl req -x509 -nodes -subj "/C=US/ST=Texas/L=Austin/O=Talligent/CN=talligent.net/emailAddress=support@talligent.com/subjectAltName=IP:$floating_ip" -days 365 -newkey rsa:2048 -keyout openbook.key -out openbook.crt
             # openssl x509 -in openbook.crt -text -noout
             cat openbook.crt openbook.key > openbook.pem
             mv openbook.pem /etc/ssl/private/
             
+            # write the galera haproxy config script
+            cat >>/etc/haproxy/galera.py <<EOF
+            import sys
+            import json
+            import subprocess
+            
+            # load server list from metadata
+            metadata = json.loads(sys.stdin.read())
+            galera_servers = json.loads(metadata.get('meta', {}).get('galera', '[]'))
+            galera_primary = metadata.get('meta', {}).get('galera_primary')
+            if not galera_servers:
+                sys.exit(1)  # bad metadata
+            
+            # append to haproxy_base config file
+            f = open('/etc/haproxy/haproxy.cfg', 'a')
+            f.write("""
+            listen galera *:3306
+                mode tcp
+                balance roundrobin
+                timeout check 5s
+            """)
+            # Add primary galera node
+            f.write('    server galera-primary %s:3306 weight 1 check inter 5s fall 5\n' % galera_primary)
+            
+            # Add remaining galera nodes
+            for i, server in enumerate(galera_servers, start=1):
+                f.write('    server server-{0} {1}:3306 weight 1 check inter 5s fall 5\n'.format(i, server))
+            f.close()
+            EOF
+            
             # update haproxy config
             sed -i "/^global/a\\\ttune.ssl.default-dh-param 2048" /etc/haproxy/haproxy.cfg
             sed -i "/mode\thttp/a\\\toption forwardfor\n\toption http-server-close" /etc/haproxy/haproxy.cfg
+            
+            # Add the galera cluster to haproxy
+            curl -s http://169.254.169.254/openstack/latest/meta_data.json | python /etc/haproxy/galera.py | /usr/bin/logger -t haproxy_galera
+            
             cat << EOF >> /etc/haproxy/haproxy.cfg
             frontend www-https
                 bind    *:443 ssl crt /etc/ssl/private/openbook.pem
@@ -160,23 +204,15 @@ resources:
             if current_servers == new_servers:
                 sys.exit(0)  # no changes
             
-            # record updated list of servers
             open('/etc/haproxy/servers.json', 'wt').write(json.dumps(new_servers))
             
             # generate a new haproxy config file
             f = open('/etc/haproxy/haproxy.cfg', 'wt')
             f.write(open('/etc/haproxy/haproxy_base.cfg').read())
-            #f.write("""
-            #listen app *:80
-            #    mode http
-            #    balance roundrobin
-            #    option httpclose
-            #    option forwardfor
-            #""")
             for i, server in enumerate(new_servers):
                 f.write('    server server-{0} {1}:8080 check cookie server-{0}\n'.format(i, server))
             f.close()
-            
+                
             # reload haproxy's configuration
             print('Reloading haproxy with servers: ' + ', '.join(new_servers))
             subprocess.call(['service', 'haproxy', 'reload'])

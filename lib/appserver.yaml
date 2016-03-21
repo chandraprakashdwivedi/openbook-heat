@@ -40,7 +40,7 @@ parameters:
     type: string
     label: Galera IP
     description: IP address of the Galera cluster load balancer
-  admin_password:
+  admin_pass:
     type: string
     description: Password to access database as root user
   sharefile_user:
@@ -108,7 +108,7 @@ resources:
             wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
             $floating_ip: { get_param: floating_ip }
             $galera_ip: { get_param: galera_ip }
-            $admin_password: { get_param: admin_password }
+            $admin_password: { get_param: admin_pass }
             $sharefile_user: { get_param: sharefile_user }
             $sharefile_pass: { get_param: sharefile_pass }
             $alt_download_url: { get_param: alt_download_url }
