@@ -278,6 +278,29 @@ resources:
                 sed -i 's/^    //g' $MYSQL_CONF_DIR/server.cnf
                 
                 systemctl stop mysql
+                cat <<EOF>> /tmp/galera.te
+            module galera 1.0;
+            
+            require {
+                    type rsync_exec_t;
+                    type mysqld_t;
+                    type kerberos_port_t;
+                    class process setpgid;
+                    class tcp_socket name_bind;
+                    class file { getattr execute_no_trans read execute open };
+            }
+            
+            #============= mysqld_t ==============
+            allow mysqld_t kerberos_port_t:tcp_socket name_bind;
+            allow mysqld_t rsync_exec_t:file execute_no_trans;
+            allow mysqld_t rsync_exec_t:file open;
+            allow mysqld_t rsync_exec_t:file getattr;
+            allow mysqld_t rsync_exec_t:file { read execute };
+            allow mysqld_t self:process setpgid;
+            EOF
+                checkmodule -M -m -o /tmp/galera.mod /tmp/galera.te
+                semodule_package -m /tmp/galera.mod -o /root/galera.pp
+                semodule -i /root/galera.pp
                 galera_new_cluster
             else
                 exit 1
