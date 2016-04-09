@@ -44,18 +44,20 @@ openbook-cluster
 ================
 Similar requirements to the openbook-single template. This template deploys a seven node architeture
 consisting of a three-node galera cluster, three (default) tomcat servers, and an haproxy sitting in
-front of the tomcat servers.  It currently uses the load balancing as a service feature of OpenStack
-for the galera cluster.
+front of the tomcat servers.  
+
 
 Example usage
 -------------
 On a machine with the python-heatclient (source your keystonerc or include your openstack credentials in the heat call)
 
+Depending on your bandwidth, you may need to pass the "timeout" argument: --timeout 120
 This assumes that you have a public network named 'public' (default), otherwise, include the name/id
-of the public network in the parameters "public_net=<public network id/name":
+of the public network in the parameters "public_net=<public network id/name>":
 
 ```
 heat -d -v stack-create openbook-single-stack \
+  --timeout 120 \
   -u https://raw.githubusercontent.com/Talligent/openbook-heat/master/openbook-cluster.yaml \
   -e https://raw.githubusercontent.com/Talligent/openbook-heat/master/lib/env.yaml \
   -P "key_name=<keypair name>;image=<image name/id>;private_net=<private network name/id>;sharefile_user=<sharefile username>;sharefile_pass=<sharefile password>"
