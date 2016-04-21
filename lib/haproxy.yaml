@@ -224,28 +224,28 @@ resources:
             crontab <_crontab
             rm _crontab
             
-            # Add SELinux policy for galera frontend
-            cat <<EOF>> /tmp/haproxy-galera.te
-            module haproxy-galera 1.0;
-            
-            require {
-                    type mysqld_port_t;
-                    type haproxy_t;
-                    class tcp_socket name_bind;
-            }
-            
-            allow haproxy_t mysqld_port_t:tcp_socket name_bind;
-            EOF
-            checkmodule -M -m -o /tmp/haproxy-galera.te
-            semodule_package -m /tmp/haproxy-galera.te -o /root/haproxy-galera.pp
-            semodule -i /root/haproxy-galera.pp
-            
             # Restart haproxy
             sleep 60
             
             if [[ "$DISTRO" == "Ubuntu" ]]; then
                 service haproxy restart
             elif [[ "$DISTRO" == "CentOS" ]]; then
+                # Add SELinux policy for galera frontend
+                cat <<EOF>> /tmp/haproxy-galera.te
+                module haproxy-galera 1.0;
+                
+                require {
+                        type mysqld_port_t;
+                        type haproxy_t;
+                        class tcp_socket name_bind;
+                }
+                
+                allow haproxy_t mysqld_port_t:tcp_socket name_bind;
+            EOF
+                checkmodule -M -m -o /tmp/haproxy-galera.te
+                semodule_package -m /tmp/haproxy-galera.te -o /root/haproxy-galera.pp
+                semodule -i /root/haproxy-galera.pp
+            
                 chcon --reference /etc/ssl/private/ca-bundle.crt /etc/ssl/private/openbook.pem
                 systemctl start haproxy
                 systemctl enable haproxy
