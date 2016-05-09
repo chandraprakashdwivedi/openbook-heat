@@ -164,7 +164,6 @@ resources:
                     debconf-set-selections <<< "mariadb-galera-server-10.0 mysql-server/root_password password $admin_password"
                     debconf-set-selections <<< "mariadb-galera-server-10.0 mysql-server/root_password_again password $admin_password"
                     apt-get -y install mariadb-galera-server-10.0 galera unzip ntp
-                    sleep 10; service mysql stop
                     ;;
                 'CentOS')
                     MYSQL_CONF_DIR='/etc/my.cnf.d'
@@ -255,6 +254,7 @@ resources:
             EOF
                 sed -i 's/^    //g' /etc/mysql/debian.cnf
 
+                sleep 10; service mysql stop
                 sleep 10; service mysql start
                 
             elif [[ "$DISTRO" == "CentOS" ]]; then
