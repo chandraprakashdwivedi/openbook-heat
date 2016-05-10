@@ -255,7 +255,7 @@ resources:
                 sed -i 's/^    //g' /etc/mysql/debian.cnf
 
                 sleep 60; service mysql stop
-                sleep 30; service mysql start
+                sleep 60; service mysql start
                 
             elif [[ "$DISTRO" == "CentOS" ]]; then
                 # Enable galera in /etc/my.cnf.d/server.cnf
