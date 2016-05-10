@@ -212,7 +212,6 @@ resources:
             
             
             if [[ "$DISTRO" == "Ubuntu" ]]; then
-                sleep 60; service mysql stop
                 cat << EOF >> $MYSQL_CONF_DIR/cluster.cnf
                 [mysqld]
                 query_cache_size=0
@@ -255,8 +254,7 @@ resources:
             EOF
                 sed -i 's/^    //g' /etc/mysql/debian.cnf
 
-                sleep 60; service mysql stop
-                sleep 60; service mysql start
+                sleep 90; service mysql restart
                 
             elif [[ "$DISTRO" == "CentOS" ]]; then
                 # Enable galera in /etc/my.cnf.d/server.cnf
