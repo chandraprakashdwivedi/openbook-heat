@@ -212,6 +212,7 @@ resources:
             
             
             if [[ "$DISTRO" == "Ubuntu" ]]; then
+                sleep 60; service mysql stop
                 cat << EOF >> $MYSQL_CONF_DIR/cluster.cnf
                 [mysqld]
                 query_cache_size=0
