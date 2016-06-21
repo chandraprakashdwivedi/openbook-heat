@@ -133,7 +133,7 @@ resources:
             wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
           template: |
             #!/bin/bash -ex
-            my_ip=$(curl http://169.254.169.254/2009-04-04/meta-data/local-ipv4)
+            my_ip=$(curl -k http://169.254.169.254/2009-04-04/meta-data/local-ipv4)
             echo "$my_ip  $(hostname)" >> /etc/hosts
             if [ -f /etc/lsb-release ]; then
               DISTRO="Ubuntu"

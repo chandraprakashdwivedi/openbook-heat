@@ -93,7 +93,7 @@ resources:
             $floating_ip: { get_param: floating_ip }
           template: |
             #!/bin/bash -ex
-            echo "$(curl http://169.254.169.254/2009-04-04/meta-data/local-ipv4)  $(hostname)" >> /etc/hosts
+            echo "$(curl -k http://169.254.169.254/2009-04-04/meta-data/local-ipv4)  $(hostname)" >> /etc/hosts
             
             if [ -f /etc/lsb-release ]; then
               DISTRO="Ubuntu"
@@ -161,7 +161,7 @@ resources:
             sed -i "/mode\thttp/a\\\toption forwardfor\n\toption http-server-close" /etc/haproxy/haproxy.cfg
             
             # Add the galera cluster to haproxy
-            curl -s http://169.254.169.254/openstack/latest/meta_data.json | python /etc/haproxy/galera.py | /usr/bin/logger -t haproxy_galera
+            curl -s -k http://169.254.169.254/openstack/latest/meta_data.json | python /etc/haproxy/galera.py | /usr/bin/logger -t haproxy_galera
             
             cat << EOF >> /etc/haproxy/haproxy.cfg
             frontend www-https
@@ -220,7 +220,7 @@ resources:
             
             # add a cron job to monitor the metadata and update haproxy
             crontab -l >_crontab || true
-            echo "* * * * * curl -s http://169.254.169.254/openstack/latest/meta_data.json | python /etc/haproxy/update.py | /usr/bin/logger -t haproxy_update" >>_crontab
+            echo "* * * * * curl -s -k http://169.254.169.254/openstack/latest/meta_data.json | python /etc/haproxy/update.py | /usr/bin/logger -t haproxy_update" >>_crontab
             crontab <_crontab
             rm _crontab
             
