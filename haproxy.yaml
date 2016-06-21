@@ -1,0 +1,267 @@
+#
+# This is a Talligent Heat template for deploying Openbook.
+# Default user/pass for the Openbook UI is: openbook / Tall!gent
+# supports Juno, Kilo
+
+heat_template_version: 2013-05-23
+
+description: >
+  Talligent Heat template for deploying Openbook in a
+  cluster scenario.
+
+parameters:
+  key_name:
+    type: string
+    description: Name of an existing key pair to use for the server
+    constraints:
+      - custom_constraint: nova.keypair
+  image:
+    type: string
+    description: Image ID or image name to use for the server
+    default: ubuntu-14.04
+    constraints:
+      - custom_constraint: glance.image
+  flavor:
+    type: string
+    description: Flavor for the server to be created
+    default: m1.small
+    constraints:
+      - custom_constraint: nova.flavor
+  servers:
+    type: comma_delimited_list
+    label: Servers
+    description: Comma separated list of servers in the cluster.
+  galera_primary:
+    type: string
+    label: Galera
+    description: Primary server in the galera cluster
+  galera:
+    type: comma_delimited_list
+    label: Galera
+    description: Comma separated list of servers in the galera cluster
+  port_id:
+    type: string
+    description: ID of an existing port to associate with this server
+  floating_ip:
+    type: string
+    label: Floating IP
+    description: Public IP (floating ip) that will be used to access Openbook.
+  
+resources:
+  wait_condition:
+    type: OS::Heat::WaitCondition
+    properties:
+      handle: { get_resource: wait_handle }
+      count: 1
+      timeout: 7200
+
+  wait_handle:
+    type: OS::Heat::WaitConditionHandle
+  
+  security_group:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: openbook-haproxy
+      description: Enable access to Openbook and SSH access
+      rules:
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 22
+          port_range_max: 22
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 443
+          port_range_max: 443
+  
+  haproxy_instance:
+    type: OS::Nova::Server
+    properties:
+      key_name: { get_param: key_name }
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      networks:
+        - port: { get_param: port_id }
+      metadata:
+        servers: { get_param: servers }
+        galera_primary: { get_param: galera_primary }
+        galera: { get_param: galera }
+      user_data_format: RAW
+      user_data:
+        str_replace:
+          params:
+            wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
+            $floating_ip: { get_param: floating_ip }
+          template: |
+            #!/bin/bash -ex
+            echo "$(curl -k http://169.254.169.254/2009-04-04/meta-data/local-ipv4)  $(hostname)" >> /etc/hosts
+            
+            if [ -f /etc/lsb-release ]; then
+              DISTRO="Ubuntu"
+            elif [ -f /etc/redhat-release ]; then
+              DISTRO="CentOS"
+            else
+              echo "Unable to determine if Ubuntu or CentOS"
+              exit 1
+            fi
+            case $DISTRO in
+                'Ubuntu')
+                    
+                    # Check which version of haproxy is available, add repo if it's not 1.5+
+                    if [[ ! "$(aptitude versions ^haproxy$ | awk '{if (NR!=1) {print $2}}')" =~ ^1.5 ]]; then
+                        add-apt-repository -y ppa:vbernat/haproxy-1.5
+                    fi
+                    apt-get update
+                    aptitude install -y haproxy
+                    ;;
+                'CentOS')
+                    ln -s /etc/ssl/certs /etc/ssl/private
+                    yum -y install haproxy
+                    ;;
+            esac
+            
+            # Generate self-signed certificate
+            #openssl req -x509 -nodes -subj "/C=US/ST=Texas/L=Austin/O=Talligent/CN=talligent.net/emailAddress=support@talligent.com" -days 365 -newkey rsa:2048 -keyout openbook.key -out openbook.crt
+            openssl req -x509 -nodes -subj "/C=US/ST=Texas/L=Austin/O=Talligent/CN=talligent.net/emailAddress=support@talligent.com/subjectAltName=IP:$floating_ip" -days 365 -newkey rsa:2048 -keyout openbook.key -out openbook.crt
+            # openssl x509 -in openbook.crt -text -noout
+            cat openbook.crt openbook.key > openbook.pem
+            mv openbook.pem /etc/ssl/private/
+            
+            # write the galera haproxy config script
+            cat >>/etc/haproxy/galera.py <<EOF
+            import sys
+            import json
+            import subprocess
+            
+            # load server list from metadata
+            metadata = json.loads(sys.stdin.read())
+            galera_servers = json.loads(metadata.get('meta', {}).get('galera', '[]'))
+            galera_primary = metadata.get('meta', {}).get('galera_primary')
+            if not galera_servers:
+                sys.exit(1)  # bad metadata
+            
+            # append to haproxy_base config file
+            f = open('/etc/haproxy/haproxy.cfg', 'a')
+            f.write("""
+            listen galera *:3306
+                mode tcp
+                balance roundrobin
+                timeout check 5s
+            """)
+            # Add primary galera node
+            f.write('    server galera-primary %s:3306 weight 1 check inter 5s fall 5\n' % galera_primary)
+            
+            # Add remaining galera nodes
+            for i, server in enumerate(galera_servers, start=1):
+                f.write('    server server-{0} {1}:3306 weight 1 check inter 5s fall 5\n'.format(i, server))
+            f.close()
+            EOF
+            
+            # update haproxy config
+            sed -i "/^global/a\\\ttune.ssl.default-dh-param 2048" /etc/haproxy/haproxy.cfg
+            sed -i "/mode\thttp/a\\\toption forwardfor\n\toption http-server-close" /etc/haproxy/haproxy.cfg
+            
+            # Add the galera cluster to haproxy
+            curl -s -k http://169.254.169.254/openstack/latest/meta_data.json | python /etc/haproxy/galera.py | /usr/bin/logger -t haproxy_galera
+            
+            cat << EOF >> /etc/haproxy/haproxy.cfg
+            frontend www-https
+                bind    *:443 ssl crt /etc/ssl/private/openbook.pem
+                rspirep ^Location:\ http://(.*) Location:\ https://\1
+                mode    http
+                option  httpclose
+                option  forwardfor
+                reqadd  X-Forwarded-Proto:\ https
+                default_backend appserver-backend
+                
+            backend appserver-backend
+                balance roundrobin
+                cookie  ROUTEID insert indirect nocache
+            EOF
+            
+            # Add the Rackspace haproxy update example
+            # save haproxy original configuration
+            cp /etc/haproxy/haproxy.cfg /etc/haproxy/haproxy_base.cfg
+            
+            # write an initial empty list of worker servers
+            cat >>/etc/haproxy/servers.json <<EOF
+            []
+            EOF
+            
+            # write the update script
+            cat >>/etc/haproxy/update.py <<EOF
+            import sys
+            import json
+            import subprocess
+            
+            # load server list from metadata
+            metadata = json.loads(sys.stdin.read())
+            new_servers = json.loads(metadata.get('meta', {}).get('servers', '[]'))
+            if not new_servers:
+                sys.exit(1)  # bad metadata
+            
+            # compare against known list of servers
+            current_servers = json.loads(open('/etc/haproxy/servers.json').read())
+            if current_servers == new_servers:
+                sys.exit(0)  # no changes
+            
+            open('/etc/haproxy/servers.json', 'wt').write(json.dumps(new_servers))
+            
+            # generate a new haproxy config file
+            f = open('/etc/haproxy/haproxy.cfg', 'wt')
+            f.write(open('/etc/haproxy/haproxy_base.cfg').read())
+            for i, server in enumerate(new_servers):
+                f.write('    server server-{0} {1}:8080 check cookie server-{0}\n'.format(i, server))
+            f.close()
+                
+            # reload haproxy's configuration
+            print('Reloading haproxy with servers: ' + ', '.join(new_servers))
+            subprocess.call(['service', 'haproxy', 'reload'])
+            EOF
+            
+            # add a cron job to monitor the metadata and update haproxy
+            crontab -l >_crontab || true
+            echo "* * * * * curl -s -k http://169.254.169.254/openstack/latest/meta_data.json | python /etc/haproxy/update.py | /usr/bin/logger -t haproxy_update" >>_crontab
+            crontab <_crontab
+            rm _crontab
+            
+            # Restart haproxy
+            sleep 60
+            
+            if [[ "$DISTRO" == "Ubuntu" ]]; then
+                service haproxy restart
+            elif [[ "$DISTRO" == "CentOS" ]]; then
+                # Add SELinux policy for galera frontend
+                cat <<EOF>> /tmp/haproxy-galera.te
+                module haproxy-galera 1.0;
+                
+                require {
+                        type mysqld_port_t;
+                        type haproxy_t;
+                        class tcp_socket name_bind;
+                }
+                
+                allow haproxy_t mysqld_port_t:tcp_socket name_bind;
+            EOF
+                checkmodule -M -m -o /tmp/haproxy-galera.te
+                semodule_package -m /tmp/haproxy-galera.te -o /root/haproxy-galera.pp
+                semodule -i /root/haproxy-galera.pp
+            
+                chcon --reference /etc/ssl/private/ca-bundle.crt /etc/ssl/private/openbook.pem
+                systemctl start haproxy
+                systemctl enable haproxy
+            else
+                exit 1;
+            fi
+            
+            wc_notify --data-binary '{"status": "SUCCESS"}'
+
+outputs:
+  name:
+    description: Name of the HAProxy instance.
+    value: { get_attr: [haproxy_instance, name] }
+  ip:
+    description: The IP address of the HAProxy instance.
+    value: { get_attr: [haproxy_instance, first_address] }
+  port:
+    description: The network port of the HAProxy instance.
+    value: { get_resource: port }

@@ -1,0 +1,327 @@
+#
+# This is a Talligent Heat template for deploying Openbook.
+# Default user/pass for the Openbook UI is: openbook / Tall!gent
+# supports Juno, Kilo
+
+heat_template_version: 2013-05-23
+
+description: >
+  Talligent Heat template for deploying Openbook in a
+  cluster scenario.
+
+parameters:
+  key_name:
+    type: string
+    description: Name of an existing key pair to use for the server
+    constraints:
+      - custom_constraint: nova.keypair
+  image:
+    type: string
+    description: Image ID or image name to use for the server
+    default: ubuntu-14.04
+    constraints:
+      - custom_constraint: glance.image
+  flavor:
+    type: string
+    description: Flavor for the server to be created
+    default: m1.small
+    constraints:
+      - custom_constraint: nova.flavor
+  private_net:
+    type: string
+    description: Name of the private network for the compute server
+    default: private
+    constraints:
+      - custom_constraint: neutron.network
+  sharefile_user:
+    type: string
+    label: Sharefile Username
+    description: Username for accessing Talligent Sharefile
+    default: none
+  sharefile_pass:
+    type: string
+    label: Sharefile Password
+    description: Password for accessing Talligent Sharefile
+    default: none
+    hidden: true
+  alt_download_url:
+    type: string
+    label: Alternate Openbook download URL
+    description: Alternative download location of Openbook zip if Sharefile credentials are not provided
+    default: none
+  admin_pass:
+    type: string
+    label: Database password
+    description: Random generated password for root database user
+    default: none
+  galera_primary:
+    type: string
+    label: Galera bootstrap node IP
+    description: IP address of bootstrap galera node
+    default: none
+
+resources:
+  wait_condition:
+    type: OS::Heat::WaitCondition
+    properties:
+      handle: { get_resource: wait_handle }
+      count: 1
+      timeout: 7200
+
+  wait_handle:
+    type: OS::Heat::WaitConditionHandle
+  
+  administrative_password:
+    type: OS::Heat::RandomString
+
+  security_group:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: openbook-galera
+      description: Enable access to Openbook and SSH access
+      rules:
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 22
+          port_range_max: 22
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 3306
+          port_range_max: 3306
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 4567
+          port_range_max: 4567
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: udp
+          port_range_min: 4567
+          port_range_max: 4567
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 4568
+          port_range_max: 4568
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 4444
+          port_range_max: 4444
+  
+  port:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_param: private_net }
+      security_groups:
+        - { get_resource: security_group }
+    
+  
+  galera_node:
+    type: OS::Nova::Server
+    properties:
+      #name: galera2
+      #admin_password: { get_param: admin_password }
+      key_name: { get_param: key_name }
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      networks:
+        - network: { get_param: private_net }
+      security_groups: [ { get_resource: security_group } ]
+      user_data_format: RAW
+      user_data:
+        str_replace:
+          params:
+            $admin_password: { get_param: admin_pass }
+            $master_ip: { get_param: galera_primary }
+            wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
+          template: |
+            #!/bin/bash -ex
+            my_ip=$(curl -k http://169.254.169.254/2009-04-04/meta-data/local-ipv4)
+            echo "$my_ip  $(hostname)" >> /etc/hosts
+            if [ -f /etc/lsb-release ]; then
+              DISTRO="Ubuntu"
+            elif [ -f /etc/redhat-release ]; then
+              DISTRO="CentOS"
+            else
+              echo "Unable to determine if Ubuntu or CentOS"
+              exit 1
+            fi
+            
+            case $DISTRO in
+                'Ubuntu')
+                    MYSQL_CONF_DIR='/etc/mysql/conf.d'
+                    WSREP_PROVIDER='/usr/lib/galera/libgalera_smm.so'
+                                
+                    # Check for mariadb availability before adding key and repo
+                    MARIADB_AVAILABLE=$(aptitude -F "%p" search mariadb-galera-server-10.0)
+                    if [ "" == "$MARIADB_AVAILABLE" ]; then
+                        apt-get install software-properties-common
+                        apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
+                        add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
+                        apt-get update
+                    fi
+                    
+                    export DEBIAN_FRONTEND=noninteractive
+                    
+                    # configure/confirm the default root password during installation
+                    debconf-set-selections <<< "mariadb-galera-server-10.0 mysql-server/root_password password $admin_password"
+                    debconf-set-selections <<< "mariadb-galera-server-10.0 mysql-server/root_password_again password $admin_password"
+                    apt-get -y install mariadb-galera-server-10.0 galera unzip ntp
+                    ;;
+                'CentOS')
+                    MYSQL_CONF_DIR='/etc/my.cnf.d'
+                    WSREP_PROVIDER='/usr/lib64/galera/libgalera_smm.so'
+
+                    cat << EOF >> /etc/yum.repos.d/MariaDB.repo
+                    [mariadb]
+                    name = MariaDB
+                    baseurl = http://yum.mariadb.org/10.1/centos7-amd64
+                    gpgkey=https://yum.mariadb.org/RPM-GPG-KEY-MariaDB
+                    gpgcheck=1
+            EOF
+                    sed -i 's/^        //g' /etc/yum.repos.d/MariaDB.repo
+
+                    yum -y install MariaDB-server MariaDB-client wget unzip ntp
+                    systemctl start mariadb
+                    mysql -uroot mysql <<-EOF
+                    update user set password=password('$admin_password') where user='root';
+                    flush privileges;
+            EOF
+
+                    ;;
+            esac
+            
+            cat << EOF >> /root/.my.cnf
+            [mysql]
+            user=root
+            password=$admin_password
+            EOF
+            
+            # mysql_secure_installation  # this asks several questions
+            ## Apparently, we can do these queries manually, instead
+            mysql -uroot -p$admin_password <<-EOF
+            DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
+            DELETE FROM mysql.user WHERE User='';
+            DELETE FROM mysql.db WHERE Db='test' OR Db='test\_%';
+            FLUSH PRIVILEGES;
+            EOF
+            
+            mysql -uroot -p$admin_password <<-EOF
+            GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' IDENTIFIED BY '$admin_password' WITH GRANT OPTION;
+            GRANT ALL PRIVILEGES ON *.* TO 'debian-sys-maint'@'localhost' IDENTIFIED BY '$admin_password';
+            EOF
+            
+            #service mysql stop
+            
+            
+            if [[ "$DISTRO" == "Ubuntu" ]]; then
+                cat << EOF >> $MYSQL_CONF_DIR/cluster.cnf
+                [mysqld]
+                query_cache_size=0
+                binlog_format=ROW
+                default-storage-engine=innodb
+                innodb_autoinc_lock_mode=2
+                query_cache_type=0
+                bind-address=0.0.0.0
+
+                # Galera Provider Configuration
+                wsrep_provider=$WSREP_PROVIDER
+
+                # Galera Cluster Configuration
+                wsrep_cluster_name="openbook_cluster"
+                wsrep_cluster_address="gcomm://$master_ip"
+
+                # Galera Synchronization Congifuration
+                wsrep_sst_method=rsync
+
+                # Galera Node Configuration
+                wsrep_node_address="$my_ip"
+                wsrep_node_name="galera_$my_ip"
+            EOF
+                sed -i 's/^    //g' $MYSQL_CONF_DIR/cluster.cnf
+                
+            #sed -i "s/bind-address.*/bind-address = 0.0.0.0/" /etc/mysql/my.cnf
+
+                cat << EOF > /etc/mysql/debian.cnf
+                [client]
+                host     = localhost
+                user     = debian-sys-maint
+                password = $admin_password
+                socket   = /var/run/mysqld/mysqld.sock
+                [mysql_upgrade]
+                host     = localhost
+                user     = debian-sys-maint
+                password = $admin_password
+                socket   = /var/run/mysqld/mysqld.sock
+                basedir  = /usr
+            EOF
+                sed -i 's/^    //g' /etc/mysql/debian.cnf
+
+                sleep 90; service mysql restart
+                
+            elif [[ "$DISTRO" == "CentOS" ]]; then
+                # Enable galera in /etc/my.cnf.d/server.cnf
+                sed -i "/\[galera\]/a\wsrep_on=ON\\
+                query_cache_size=0\\
+                binlog_format=ROW\\
+                default-storage-engine=innodb\\
+                innodb_autoinc_lock_mode=2\\
+                query_cache_type=0\\
+                bind-address=0.0.0.0\\
+                \\
+                # Galera Provider Configuration\\
+                wsrep_provider=$WSREP_PROVIDER\\
+                \\
+                # Galera Cluster Configuration\\
+                wsrep_cluster_name='openbook_cluster'\\
+                wsrep_cluster_address='gcomm://$master_ip'\\
+                \\
+                # Galera Synchronization Congifuration\\
+                wsrep_sst_method=rsync\\
+                \\
+                # Galera Node Configuration\\
+                wsrep_node_address='$my_ip'\\
+                wsrep_node_name='galera_$my_ip'" $MYSQL_CONF_DIR/server.cnf
+
+                sed -i 's/^    //g' $MYSQL_CONF_DIR/server.cnf
+                cat <<EOF>> /tmp/galera.te
+            module galera 1.0;
+
+            require {
+                    type rsync_exec_t;
+                    type mysqld_t;
+                    type kerberos_port_t;
+                    class process setpgid;
+                    class tcp_socket name_bind;
+                    class file { getattr execute_no_trans read execute open };
+            }
+
+            #============= mysqld_t ==============
+            allow mysqld_t kerberos_port_t:tcp_socket name_bind;
+            allow mysqld_t rsync_exec_t:file execute_no_trans;
+            allow mysqld_t rsync_exec_t:file open;
+            allow mysqld_t rsync_exec_t:file getattr;
+            allow mysqld_t rsync_exec_t:file { read execute };
+            allow mysqld_t self:process setpgid;
+            EOF
+                checkmodule -M -m -o /tmp/galera.mod /tmp/galera.te
+                semodule_package -m /tmp/galera.mod -o /root/galera.pp
+                semodule -i /root/galera.pp
+
+                systemctl restart mysql
+            else
+                exit 1
+            fi
+            
+            
+            wc_notify --data-binary '{"status": "SUCCESS"}'
+  
+
+outputs:
+  ip:
+    description: The IP address of the instance.
+    value: { get_attr: [galera_node, first_address] }
+  port:
+    description: The network port of the Openbook instance.
+    value: { get_resource: port }
+  priv_subnet:
+    description: The private subnet, hopefully
+    value: { get_attr: [ port, subnets, 0, id ] }
+

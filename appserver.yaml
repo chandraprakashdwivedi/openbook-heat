@@ -1,0 +1,233 @@
+#
+# This is a Talligent Heat template for deploying Openbook.
+# Default user/pass for the Openbook UI is: openbook / Tall!gent
+# supports Juno, Kilo
+
+heat_template_version: 2013-05-23
+
+description: >
+  Talligent Heat template for deploying Openbook in a
+  cluster scenario.
+
+parameters:
+  key_name:
+    type: string
+    description: Name of an existing key pair to use for the server
+    constraints:
+      - custom_constraint: nova.keypair
+  image:
+    type: string
+    description: Image ID or image name to use for the server
+    constraints:
+      - custom_constraint: glance.image
+  flavor:
+    type: string
+    description: Flavor for the server to be created
+    default: m1.small
+    constraints:
+      - custom_constraint: nova.flavor
+  private_net:
+    type: string
+    description: Name of the private network for the compute server
+    default: private
+    constraints:
+      - custom_constraint: neutron.network
+  floating_ip:
+    type: string
+    label: Floating IP
+    description: Public IP (floating ip) that will be used to access Openbook.
+  galera_ip:
+    type: string
+    label: Galera IP
+    description: IP address of the Galera cluster load balancer
+  admin_pass:
+    type: string
+    description: Password to access database as root user
+  sharefile_user:
+    type: string
+    label: Sharefile Username
+    description: Username for accessing Talligent Sharefile
+    default: none
+  sharefile_pass:
+    type: string
+    label: Sharefile Password
+    description: Password for accessing Talligent Sharefile
+    default: none
+    hidden: true
+  alt_download_url:
+    type: string
+    label: Alternate Openbook download URL
+    description: Alternative download location of Openbook zip if Sharefile credentials are not provided
+    default: none
+
+resources:
+  wait_condition:
+    type: OS::Heat::WaitCondition
+    properties:
+      handle: { get_resource: wait_handle }
+      count: 1
+      timeout: 7200
+
+  wait_handle:
+    type: OS::Heat::WaitConditionHandle
+  
+  security_group:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: openbook-appserver
+      description: Enable access to Openbook and SSH access
+      rules:
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 22
+          port_range_max: 22
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 8080
+          port_range_max: 8080
+  
+  port:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_param: private_net }
+      security_groups:
+        - { get_resource: security_group }
+    
+  openbook_instance:
+    type: OS::Nova::Server
+    properties:
+      key_name: { get_param: key_name }
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      networks:
+        - port: { get_resource: port }
+      user_data_format: RAW
+      user_data:
+        str_replace:
+          params:
+            wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
+            $floating_ip: { get_param: floating_ip }
+            $galera_ip: { get_param: galera_ip }
+            $admin_password: { get_param: admin_pass }
+            $sharefile_user: { get_param: sharefile_user }
+            $sharefile_pass: { get_param: sharefile_pass }
+            $alt_download_url: { get_param: alt_download_url }
+          template: |
+            #!/bin/bash -ex
+            
+            echo "$(curl -k http://169.254.169.254/2009-04-04/meta-data/local-ipv4)  $(hostname)" >> /etc/hosts
+            
+            if [ -f /etc/lsb-release ]; then
+              DISTRO="Ubuntu"
+            elif [ -f /etc/redhat-release ]; then
+              DISTRO="CentOS"
+            else
+              echo "Unable to determine if Ubuntu or CentOS"
+              exit 1
+            fi
+            
+            # Set the max heap size
+            JVM_HEAP_PERCENT=50
+            TOTAL_MEM=$(free -m | awk '/Mem:/ {print $2}')
+            let JVM_HEAP=$TOTAL_MEM*$JVM_HEAP_PERCENT/100
+            
+            case $DISTRO in
+                'Ubuntu')
+                    TOMCAT_DIR='/var/lib/tomcat7'
+                    # Check for mariadb availability before adding key and repo
+                    MARIADB_AVAILABLE=$(aptitude -F "%p" search mariadb-client-core-10.0)
+                    if [ "" == "$MARIADB_AVAILABLE" ]; then
+                        apt-get install software-properties-common
+                        apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xcbcb082a1bb943db
+                        add-apt-repository 'deb http://ftp.osuosl.org/pub/mariadb/repo/10.0/ubuntu trusty main'
+                    fi
+                    
+                    # Check for java-8 availability before adding repo
+                    JAVA_AVAILABLE=$(aptitude -F "%p" search openjdk-8-jdk)
+                    if [ "" == "$JAVA_AVAILABLE" ]; then
+                        apt-get install software-properties-common
+                        add-apt-repository -y ppa:openjdk-r/ppa
+                    fi
+        
+                    apt-get update
+        
+                    # Install OpenJDK 8
+                    apt-get install -y openjdk-8-jdk
+                    ln -s /usr/lib/jvm/java-8-openjdk-amd64 /usr/lib/jvm/default-java
+                    update-ca-certificates -f
+                    
+                    ### TOMCAT ###
+                    apt-get install -y tomcat7 mariadb-client-core-10.0 ntp unzip
+                    sed -i 's/Xmx.*\ /Xmx2048m /g' /etc/default/tomcat7
+                    sed -i '/^JAVA_OPTS/ s/"$/ -Djsse.enableSNIExtension=false -Djava.security.egd=file:\/dev\/urandom"/g' /etc/default/tomcat7
+                    rm -rf ${TOMCAT_DIR}/webapps/ROOT
+                    service tomcat7 stop
+                    ;;
+                'CentOS')
+                    TOMCAT_DIR='/var/lib/tomcat'
+                    cat << EOF >> /etc/yum.repos.d/MariaDB.repo
+                    [mariadb]
+                    name = MariaDB
+                    baseurl = http://yum.mariadb.org/10.1/centos7-amd64
+                    gpgkey=https://yum.mariadb.org/RPM-GPG-KEY-MariaDB
+                    gpgcheck=1
+            EOF
+                    sed -i 's/^        //g' /etc/yum.repos.d/MariaDB.repo
+
+                    yum -y install java-1.8.0-openjdk tomcat MariaDB-client wget unzip ntp
+                    
+                    echo "JAVA_OPTS='-Djava.awt.headless=true -Xmx${JVM_HEAP}m -Djava.security.egd=file:/dev/urandom'" >> /etc/sysconfig/tomcat
+                   
+                   ;; 
+            esac
+            
+            # Download and install Openbook
+            # Check for alternate download URL first
+            if [ "none" != "$alt_download_url" ]; then
+                if [[ "$alt_download_url" =~ "Openbook" ]]; then
+                    wget -q "$alt_download_url" -P "/tmp/"
+                else
+                    wget -q -r "$alt_download_url" -P "/tmp/"
+                    mv /tmp/$(echo $alt_download_url | awk -F\/ '{print $3}')/Openbook*.zip /tmp/
+                fi
+            else
+                export TOKEN=$(curl -s -k -X POST "https://talligent.sharefile.com/oauth/token" \
+                             -H "Content-Type: application/x-www-form-urlencoded" \
+                             -d "grant_type=password&client_id=eC8y8eeoeunxzOizZq2oeknIVfA9Jyjg&client_secret=PehmEqzEgKuGm2XOZWXIOUY3GyrKcfSmNtwPptPwt0tWxihs&username=$sharefile_user&password=$sharefile_pass" | python -c 'import sys, json; print json.load(sys.stdin)["access_token"]')
+                export ITEM=$(curl -s -k 'https://talligent.sf-api.com/sf/v3/Items/Search?query=.zip' -H "Authorization: Bearer $TOKEN" | python -c 'import sys, json; print json.load(sys.stdin)["Results"][0]["ItemID"]')
+                curl -s -k -L -o "/tmp/Openbook.zip" "https://talligent.sf-api.com/sf/v3/Items($ITEM)/Download" -H "Authorization: Bearer $TOKEN"
+            fi
+            
+            unzip -q /tmp/Openbook*.zip -d /tmp
+            unzip -q /tmp/Openbook-*/Openbook.war -d ${TOMCAT_DIR}/webapps/Openbook
+            
+            # Set the public url for Openbook
+            #sed -ri 's/(ROOT_PROVIDER_PUBLIC_URL = https:\/\/).*/\1$floating_ip/' /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/openbook.properties
+            sed -ri 's/(DB_\w+_HOST = ).*/\1$galera_ip/' ${TOMCAT_DIR}/webapps/Openbook/WEB-INF/classes/openbook.properties
+            
+            sleep 60
+            if [[ "$DISTRO" == "Ubuntu" ]]; then
+                chown -R tomcat7.tomcat7 ${TOMCAT_DIR}/webapps/Openbook
+                service tomcat7 start
+            elif [[ "$DISTRO" == "CentOS" ]]; then
+                chown -R tomcat.tomcat ${TOMCAT_DIR}/webapps/Openbook
+                systemctl start tomcat
+                systemctl enable tomcat
+            else
+                exit 1
+            fi
+            
+            # Sleep a little bit to allow tomcat to finish initial liquibase run for Openbook
+            sleep 60
+            
+            wc_notify --data-binary '{"status": "SUCCESS"}'
+outputs:
+  name:
+    description: Name of the instance.
+    value: { get_attr: [openbook_instance, name] }
+  ip:
+    description: The IP address of the instance.
+    value: { get_attr: [openbook_instance, first_address] }
+  port:
+    description: The network port of the Openbook instance.
+    value: { get_resource: port }
