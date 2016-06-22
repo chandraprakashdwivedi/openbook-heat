@@ -311,7 +311,7 @@ resources:
             fi
             
             
-            wc_notify --data-binary '{"status": "SUCCESS"}'
+            wc_notify --insecure --data-binary '{"status": "SUCCESS"}'
   
 
 outputs:

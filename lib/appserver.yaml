@@ -220,7 +220,7 @@ resources:
             # Sleep a little bit to allow tomcat to finish initial liquibase run for Openbook
             sleep 60
             
-            wc_notify --data-binary '{"status": "SUCCESS"}'
+            wc_notify --insecure --data-binary '{"status": "SUCCESS"}'
 outputs:
   name:
     description: Name of the instance.
