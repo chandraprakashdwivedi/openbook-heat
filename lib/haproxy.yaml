@@ -242,8 +242,8 @@ resources:
                 
                 allow haproxy_t mysqld_port_t:tcp_socket name_bind;
             EOF
-                checkmodule -M -m -o /tmp/haproxy-galera.te
-                semodule_package -m /tmp/haproxy-galera.te -o /root/haproxy-galera.pp
+                checkmodule -M -m -o /tmp/haproxy-galera.mod /tmp/haproxy-galera.te
+                semodule_package -m /tmp/haproxy-galera.mod -o /root/haproxy-galera.pp
                 semodule -i /root/haproxy-galera.pp
             
                 chcon --reference /etc/ssl/private/ca-bundle.crt /etc/ssl/private/openbook.pem
