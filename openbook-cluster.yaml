@@ -136,6 +136,7 @@ resources:
           private_net: { get_param: private_net }
           floating_ip: { get_attr: [ floating_ip, floating_ip_address ] }
           galera_ip: { get_attr: [ galera_primary, ip ] }
+          galera: { get_attr: [galera_cluster, ip] }
           sharefile_user: { get_param: sharefile_user }
           sharefile_pass: { get_param: sharefile_pass }
           alt_download_url: { get_param: alt_download_url }
@@ -150,7 +151,6 @@ resources:
       port_id: { get_resource: public_port }
       servers: { get_attr: [openbook_cluster, ip] }
       galera_primary: { get_attr: [galera_primary, ip] }
-      galera: { get_attr: [galera_cluster, ip] }
       floating_ip: { get_attr: [ floating_ip, floating_ip_address ] }
 
 outputs:
@@ -170,3 +170,4 @@ outputs:
   admin_password:
     description: The database password for the galera cluster
     value: { get_attr: [administrative_password, value] }
+

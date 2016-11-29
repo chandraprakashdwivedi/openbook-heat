@@ -40,6 +40,10 @@ parameters:
     type: string
     label: Galera IP
     description: IP address of the Galera cluster load balancer
+  galera:
+    type: comma_delimited_list
+    label: Galera
+    description: Comma separated list of servers in the galera cluster
   admin_pass:
     type: string
     description: Password to access database as root user
@@ -59,7 +63,7 @@ parameters:
     label: Alternate Openbook download URL
     description: Alternative download location of Openbook zip if Sharefile credentials are not provided
     default: none
-
+    
 resources:
   wait_condition:
     type: OS::Heat::WaitCondition
@@ -108,6 +112,8 @@ resources:
             wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }
             $floating_ip: { get_param: floating_ip }
             $galera_ip: { get_param: galera_ip }
+            $galeranode1: { "Fn::Select" : [ "0", { get_param: [galera] } ] }
+            $galeranode2: { "Fn::Select" : [ "1", { get_param: [galera] } ] }
             $admin_password: { get_param: admin_pass }
             $sharefile_user: { get_param: sharefile_user }
             $sharefile_pass: { get_param: sharefile_pass }
@@ -202,9 +208,11 @@ resources:
             unzip -q /tmp/Openbook-*/Openbook.war -d ${TOMCAT_DIR}/webapps/Openbook
             
             # Set the public url for Openbook
-            #sed -ri 's/(ROOT_PROVIDER_PUBLIC_URL = https:\/\/).*/\1$floating_ip/' /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/openbook.properties
-            sed -ri 's/(DB_\w+_HOST = ).*/\1$galera_ip/' ${TOMCAT_DIR}/webapps/Openbook/WEB-INF/classes/openbook.properties
-            
+            sed -ri 's/(ROOT_PROVIDER_PUBLIC_URL = https:\/\/).*/\$floating_ip:8443/' /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/openbook.properties
+            sed -ri 's/(DB_ENTITY_URL = ).*/\1jdbc:mariadb:failover:\/\/$galera_ip:3306,$galeranode1:3306,$galeranode2:3306\/openbook/' ${TOMCAT_DIR}/webapps/Openbook/WEB-INF/classes/openbook.properties
+            sed -ri 's/(DB_WORKFLOW_URL = ).*/\1jdbc:mariadb:failover:\/\/$galera_ip:3306,$galeranode1:3306,$galeranode2:3306\/openbook_workflow/' ${TOMCAT_DIR}/webapps/Openbook/WEB-INF/classes/openbook.properties
+            sed -ri 's/(DB_JOBS_URL = ).*/\1jdbc:mariadb:failover:\/\/$galera_ip:3306,$galeranode1:3306,$galeranode2:3306\/openbook_jobs/' ${TOMCAT_DIR}/webapps/Openbook/WEB-INF/classes/openbook.properties
+
             sleep 60
             if [[ "$DISTRO" == "Ubuntu" ]]; then
                 chown -R tomcat7.tomcat7 ${TOMCAT_DIR}/webapps/Openbook
@@ -231,3 +239,4 @@ outputs:
   port:
     description: The network port of the Openbook instance.
     value: { get_resource: port }
+
