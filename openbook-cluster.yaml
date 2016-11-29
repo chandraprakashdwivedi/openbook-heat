@@ -39,11 +39,6 @@ parameters:
     default: public
     constraints:
       - custom_constraint: neutron.network
-  cluster_size:
-    type: number
-    label: Cluster size
-    description: Number of instances in cluster.
-    default: 3
   sharefile_user:
     type: string
     label: Sharefile Username
@@ -126,7 +121,7 @@ resources:
   openbook_cluster:
     type: OS::Heat::ResourceGroup
     properties:
-      count: { get_param: cluster_size }
+      count: 3
       resource_def:
         type: Lib::MSG::Appserver
         properties:
@@ -150,7 +145,6 @@ resources:
       flavor: { get_param: flavor }
       port_id: { get_resource: public_port }
       servers: { get_attr: [openbook_cluster, ip] }
-      galera_primary: { get_attr: [galera_primary, ip] }
       floating_ip: { get_attr: [ floating_ip, floating_ip_address ] }
 
 outputs:
@@ -170,4 +164,3 @@ outputs:
   admin_password:
     description: The database password for the galera cluster
     value: { get_attr: [administrative_password, value] }
-
