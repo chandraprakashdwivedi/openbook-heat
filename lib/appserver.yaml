@@ -207,8 +207,7 @@ resources:
             unzip -q /tmp/Openbook*.zip -d /tmp
             unzip -q /tmp/Openbook-*/Openbook.war -d ${TOMCAT_DIR}/webapps/Openbook
             
-            # Set the public url for Openbook
-            sed -ri 's/(ROOT_PROVIDER_PUBLIC_URL = https:\/\/).*/\$floating_ip:8443/' /var/lib/tomcat7/webapps/Openbook/WEB-INF/classes/openbook.properties
+            # Set galarea database servers
             sed -ri 's/(DB_ENTITY_URL = ).*/\1jdbc:mariadb:failover:\/\/$galera_ip:3306,$galeranode1:3306,$galeranode2:3306\/openbook/' ${TOMCAT_DIR}/webapps/Openbook/WEB-INF/classes/openbook.properties
             sed -ri 's/(DB_WORKFLOW_URL = ).*/\1jdbc:mariadb:failover:\/\/$galera_ip:3306,$galeranode1:3306,$galeranode2:3306\/openbook_workflow/' ${TOMCAT_DIR}/webapps/Openbook/WEB-INF/classes/openbook.properties
             sed -ri 's/(DB_JOBS_URL = ).*/\1jdbc:mariadb:failover:\/\/$galera_ip:3306,$galeranode1:3306,$galeranode2:3306\/openbook_jobs/' ${TOMCAT_DIR}/webapps/Openbook/WEB-INF/classes/openbook.properties

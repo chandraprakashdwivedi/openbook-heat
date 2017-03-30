@@ -18,6 +18,7 @@ parameter_groups:
   - public_net
   - sharefile_user
   - sharefile_pass
+  - alt_download_url
 
 parameters:
   key_name:
@@ -131,7 +132,7 @@ resources:
             $alt_download_url: { get_param: alt_download_url }
           template: |
             #!/bin/bash -ex
-            
+
             echo "$floating_ip  $(hostname)" >> /etc/hosts
             if [ -f /etc/lsb-release ]; then
               DISTRO="Ubuntu"
@@ -183,23 +184,23 @@ resources:
                     # configure/confirm the default root password during installation
                     debconf-set-selections <<< 'mariadb-server-10.0 mysql-server/root_password password $admin_password'
                     debconf-set-selections <<< 'mariadb-server-10.0 mysql-server/root_password_again password $admin_password'
-                    apt-get -y install mariadb-server
-                    
+                    apt-get -y install mariadb-server mariadb-client-core-10.0 ntp unzip
+
                     ### TOMCAT ###
                     apt-get install -y tomcat7 mariadb-client-core-10.0 ntp unzip
                     sed -i "s/Xmx.*\ /Xmx${JVM_HEAP}m /g" /etc/default/tomcat7
                     sed -i '/^JAVA_OPTS/ s/"$/ -Djsse.enableSNIExtension=false -Djava.security.egd=file:\/dev\/urandom"/g' /etc/default/tomcat7
                     rm -rf ${TOMCAT_DIR}/webapps/ROOT
                     service tomcat7 stop
-
+                    
                     ;;
                 
                 'CentOS')
                     
                     MYSQL_CONF_FILE='/etc/my.cnf.d/server.cnf'
                     TOMCAT_DIR='/var/lib/tomcat'
-                    TOMCAT_CONFIG='/etc/tomcat/server.xml'
-                    
+                    TOMCAT_CONFIG='/etc/tomcat/server.xml'                    
+
                     # Add MariaDB repo
                     cat << EOF >> /etc/yum.repos.d/MariaDB.repo
                     [mariadb]
@@ -210,8 +211,8 @@ resources:
             EOF
                     sed -i 's/^        //g' /etc/yum.repos.d/MariaDB.repo
                     
-                    # Install Java 8, MariaDB, and Tomcat
-                    yum -y install java-1.8.0-openjdk tomcat MariaDB-server MariaDB-client wget unzip ntp
+                    # Install Java 8, MariaDB, Wget, NTP, Tomcat, and Unzip
+                    yum -y install java-1.8.0-openjdk MariaDB-server MariaDB-client tomcat wget unzip ntp
                     systemctl start mariadb
                     mysql -uroot mysql <<-EOF
                     update user set password=password('$admin_password') where user='root';
@@ -240,7 +241,7 @@ resources:
             # Set binglog format to MIXED (defaults to STATEMENT)
             sed -i "/\[mysqld\]/a\binlog_format = MIXED" $MYSQL_CONF_FILE
             /etc/init.d/mysql restart
-            
+
             # Generate key
             JAVA_HOME=$(readlink -f /usr/bin/java | sed 's|bin/java||')
             keytool -genkey -keyalg RSA -alias openbook \
@@ -262,7 +263,7 @@ resources:
             
             sed -i "/$SSL_MATCH/a\               keystoreFile='${JAVA_HOME}/lib/security/cacerts'\n\
                            keystorePass='changeit'" $TOMCAT_CONFIG
-            
+
             
             # Download and install Openbook
             # Check for alternate download URL first
@@ -277,7 +278,7 @@ resources:
                 export TOKEN=$(curl -s -X POST "https://talligent.sharefile.com/oauth/token" \
                              -H "Content-Type: application/x-www-form-urlencoded" \
                              -d "grant_type=password&client_id=eC8y8eeoeunxzOizZq2oeknIVfA9Jyjg&client_secret=PehmEqzEgKuGm2XOZWXIOUY3GyrKcfSmNtwPptPwt0tWxihs&username=$sharefile_user&password=$sharefile_pass" | python -c 'import sys, json; print json.load(sys.stdin)["access_token"]')
-                export ITEM=$(curl -s -k 'https://talligent.sf-api.com/sf/v3/Items/Search?query=.zip' -H "Authorization: Bearer $TOKEN" | python -c 'import sys, json; print json.load(sys.stdin)["Results"][0]["ItemID"]')
+                export ITEM=$(curl -s -k 'https://talligent.sf-api.com/sf/v3/Items/Search?query=Openbook*' -H "Authorization: Bearer $TOKEN" | python -c 'import sys, json; print json.load(sys.stdin)["Results"][0]["ItemID"]')
                 curl -s -k -L -o "/tmp/Openbook.zip" "https://talligent.sf-api.com/sf/v3/Items($ITEM)/Download" -H "Authorization: Bearer $TOKEN"
             fi
 
@@ -296,7 +297,7 @@ resources:
             else
                 exit 1
             fi
-            
+     
             # Sleep a little bit to allow tomcat to finish initial liquibase run for Openbook
             sleep 60
             
