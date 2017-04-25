@@ -178,9 +178,16 @@ resources:
                     gpgkey=https://yum.mariadb.org/RPM-GPG-KEY-MariaDB
                     gpgcheck=1
             EOF
+
                     sed -i 's/^        //g' /etc/yum.repos.d/MariaDB.repo
 
                     yum -y install java-1.8.0-openjdk tomcat MariaDB-client wget unzip ntp
+
+                    cat << EOF >> /etc/rsyslog.d/tomcat.conf
+                    programname,contains,"server" /var/log/tomcat/catalina.out
+                    programname,contains,"server" ~
+            EOF
+                    systemctl restart rsyslog
                     
                     echo "JAVA_OPTS='-Djava.awt.headless=true -Xmx${JVM_HEAP}m -Djava.security.egd=file:/dev/urandom'" >> /etc/sysconfig/tomcat
                    
